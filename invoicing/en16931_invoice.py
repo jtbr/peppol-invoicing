@@ -25,9 +25,10 @@ NS_CBC = "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
 # --- List of EU Member States ---
 EU_COUNTRY_CODES = ["AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK"]
 
-# --- Define Seller's Domestic Standard VAT Rate ---
-SELLER_STANDARD_VAT_RATE = Decimal("21.00")
-SELLER_STANDARD_VAT_CATEGORY = "S"
+# --- Default Seller's Domestic Standard VAT Rate (Belgium) ---
+# These can be overridden per-invoice via seller_data['standard_vat_rate'] and seller_data['standard_vat_category']
+DEFAULT_VAT_RATE = Decimal("21.00")
+DEFAULT_VAT_CATEGORY = "S"
 
 # --- Helper function to create elements ---
 def E(tag, ns_uri):
@@ -36,15 +37,28 @@ def E(tag, ns_uri):
 
 
 # --- Helper function to determine APPLIED VAT details ---
-def determine_vat_details(buyer_country, seller_country="BE"):
+def determine_vat_details(buyer_country, seller_country="BE", domestic_vat_rate=None, domestic_vat_category=None):
     """
     Determines VAT rate, category code, and reason based on buyer/seller countries.
-    Returns a dictionary: {'rate': Decimal, 'category_code': str, 'reason': str | None}
+
+    Args:
+        buyer_country: ISO country code of the buyer.
+        seller_country: ISO country code of the seller (default: "BE").
+        domestic_vat_rate: Standard VAT rate for domestic sales (default: Belgium 21%).
+        domestic_vat_category: VAT category code for domestic sales (default: "S").
+
+    Returns:
+        dict: {'rate': Decimal, 'category_code': str, 'reason': str | None}
     """
+    if domestic_vat_rate is None:
+        domestic_vat_rate = DEFAULT_VAT_RATE
+    if domestic_vat_category is None:
+        domestic_vat_category = DEFAULT_VAT_CATEGORY
+
     buyer_country = buyer_country.upper()
     seller_country = seller_country.upper()
     if buyer_country == seller_country: # Domestic
-        return {'rate': SELLER_STANDARD_VAT_RATE, 'category_code': SELLER_STANDARD_VAT_CATEGORY, 'reason': None}
+        return {'rate': domestic_vat_rate, 'category_code': domestic_vat_category, 'reason': None}
     elif buyer_country in EU_COUNTRY_CODES:
         # Intra-Community Supply (B2B) -> Reverse Charge
         return {
@@ -158,10 +172,12 @@ def create_party(parent_element, party_type, party_data, invoice_vat_context):
 
 
 # --- Helper function to create Invoice Line (Omits Rate for 'O' Classification) ---
-def create_invoice_line(parent, line_id, item_data, currency, line_vat_details):
+def create_invoice_line(parent, line_id, item_data, currency, line_vat_details,
+                        seller_vat_rate=None, seller_vat_category=None):
     """
     Creates InvoiceLine incl. Item/ClassifiedTaxCategory.
     Omits ClassifiedTaxCategory/Percent if category is 'O' (BR-O-05).
+    seller_vat_rate/seller_vat_category override the defaults for the ClassifiedTaxCategory.
     """
     desc = item_data.get('description', 'N/A')
     qty = Decimal(item_data.get('quantity', 0))
@@ -210,8 +226,8 @@ def create_invoice_line(parent, line_id, item_data, currency, line_vat_details):
     etree.SubElement(item, E("Name", NS_CBC)).text = desc
 
     # --- Item VAT Classification (BT-151 / ClassifiedTaxCategory) ---
-    classified_tax_cat_id = SELLER_STANDARD_VAT_CATEGORY # Default 'S'
-    classified_tax_rate = SELLER_STANDARD_VAT_RATE     # Default 21%
+    classified_tax_cat_id = seller_vat_category or DEFAULT_VAT_CATEGORY
+    classified_tax_rate = seller_vat_rate or DEFAULT_VAT_RATE
     if applied_tax_cat_id == "O":
         classified_tax_cat_id = "O" # Override for BR-O-12
 
@@ -251,7 +267,14 @@ def create_payment_means(parent, pmt_means_code, pmt_means_name, pmt_acct_id, pm
 
 # --- Main Generation Function ---
 def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data, pdf_filename=None):
-    """Generates EN16931-compliant invoice (also UBL-2.1 and where applicable, PEPPOL BIS 3.0), optionally embedding a PDF."""
+    """Generates EN16931-compliant invoice (also UBL-2.1 and where applicable, PEPPOL BIS 3.0), optionally embedding a PDF.
+
+    seller_data may optionally include 'standard_vat_rate' (Decimal) and 'standard_vat_category' (str)
+    to override the default Belgian 21% / 'S' rate for domestic invoices.
+
+    Returns:
+        dict: {'total_excl_vat': Decimal, 'total_vat': Decimal, 'total_incl_vat': Decimal}
+    """
 
     # --- Essential Data Checks ---
     if not invoice_data.get('items') or not isinstance(invoice_data['items'], list):
@@ -265,7 +288,12 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
     invoice_number = invoice_data['invoice_number']
     currency = invoice_data.get('currency', 'EUR')
 
-    applied_vat_details = determine_vat_details(buyer_data['country_code'], seller_data['country_code'])
+    # Allow seller_data to override default VAT rate/category
+    seller_vat_rate = seller_data.get('standard_vat_rate')
+    seller_vat_category = seller_data.get('standard_vat_category')
+
+    applied_vat_details = determine_vat_details(buyer_data['country_code'], seller_data['country_code'],
+                                                seller_vat_rate, seller_vat_category)
     invoice_vat_context = applied_vat_details['category_code']
     print(f"Determined APPLIED VAT Details:\n  {applied_vat_details}")
 
@@ -442,13 +470,16 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
     current_line_id = 0
     for item in invoice_data['items']: # Assumes items list is valid
         current_line_id += 1
-        create_invoice_line(Invoice, current_line_id, item, currency, applied_vat_details)
+        create_invoice_line(Invoice, current_line_id, item, currency, applied_vat_details,
+                            seller_vat_rate, seller_vat_category)
 
     # --- Output ---
     tree = etree.ElementTree(Invoice)
     tree.write(xml_filepath, pretty_print=True, xml_declaration=True, encoding="UTF-8")
     print(f"✅ Invoice saved to {xml_filepath} should be PEPPOL-ready & EN19631-compliant, with total {RED}{total_tax_inclusive}{RESET}")
     print("   Please validate using a PEPPOL / EN 16931 validator such as https://www.b2brouter.net/global/e-invoice-validatior/")
+
+    return {'total_excl_vat': total_tax_exclusive, 'total_vat': total_tax_amount, 'total_incl_vat': total_tax_inclusive}
 
 
 # --- Main execution block ---

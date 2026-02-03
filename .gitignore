@@ -1,5 +1,26 @@
+# Generated invoices
 invoices/
 invoice-samples/
+
+# Python
 __pycache__/
-*pyc
-.git/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

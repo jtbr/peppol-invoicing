@@ -37,10 +37,11 @@ def send_invoice(xml_path):
         print(f"❌ Failed to send invoice: {response.status_code}:\n{response.text}")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python peppol_invoice_sender.py <path_to_invoice.xml>")
+    if len(sys.argv) != 3:
+        print("Usage: python peppol_invoice_sender.py <path_to_invoice.xml> <path_to_UBL-Invoice-2.1.xsd>")
         sys.exit(1)
 
     xml_path = sys.argv[1]
-    invoicing.validate_invoice(xml_path)
+    xsd_path = sys.argv[2]
+    invoicing.validate_invoice(xml_path, xsd_path)
     send_invoice(xml_path)

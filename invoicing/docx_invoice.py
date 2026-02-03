@@ -217,6 +217,8 @@ def fill_word_invoice(template_path, output_path, data, params = None):
 
     print(f"✅ Word-format invoice generated, with total: {RED}{total}{RESET}, amount due: {RED}{amount_due_total}{RESET}")
 
+    return {'total_excl_vat': pretax_total, 'total_vat': vat_total, 'total_incl_vat': total}
+
 
 # TODO: May want to remove due date and instead include payment terms.
 

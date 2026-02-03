@@ -110,18 +110,29 @@ def generate_complete_invoice(hours_worked, delivery_royalties, template_path='t
 
     # TODO: support reimbursements of costs (applicable for non-VAT clients, otherwise billed with VAT)
 
+    # Determine VAT details for the buyer/seller country combination
+    vat_details = invoicing.determine_vat_details(buyer_data['country_code'], seller_data['country_code'])
+    vat_rate = float(vat_details['rate'])
+    vat_category = vat_details['category_code']
+
     # data used for populating the human readable invoice, based on that for the XML version
     # Note that most of the seller company data is already in the document template
     doc_data = copy.deepcopy(invoice_data)  # allows us to make modifications
 
-    # VAT percentage, explanations, and template assume this. the XML generation handles buyer country internally.
-    assert buyer_data['country_code'] == 'US'
-
-    # modifications
+    # modifications for docx: add vat_pct per item (XML handles this internally) and clarify descriptions
     for item in doc_data['items']:
-        item['vat_pct'] = 0  # US customer. Also, unit_code is not used.
+        item['vat_pct'] = vat_rate
         if item['unit_code'] == 'HUR':
             item['description'] += " (hours)"
+
+    # VAT-specific notes for the invoice
+    terms_text = f"{'Copyright licensing and other t' if delivery_royalties > 0 else 'T'}erms are pursuant to agreement {contract_data['contract_id']}."
+    if vat_category == 'O':
+        vat_note = "This invoice is VAT exempt under Article 39 of the VAT Code. "
+    elif vat_category == 'AE':
+        vat_note = "VAT reverse charge under Article 196 of the VAT Directive. "
+    else:
+        vat_note = ""
 
     # additions
     doc_data |= {
@@ -129,13 +140,13 @@ def generate_complete_invoice(hours_worked, delivery_royalties, template_path='t
         'client_address': invoicing.format_street_address(buyer_data, True),
         'client_vat_line': f"EIN: {invoicing.format_ein(buyer_data.get('ein', ''))}" if buyer_data.get('ein') else f"VAT #: {buyer_data.get('vat', 'n/a')}",
         'client_email': buyer_data.get('contact_email',''),
-        'notes': f"This invoice is VAT exempt under Article 39 of the VAT Code. {'Copyright licensing and other t' if delivery_royalties > 0 else 'T'}erms are pursuant to agreement {contract_data['contract_id']}.",
+        'notes': vat_note + terms_text,
     }
 
     print(f"=== Billing {CYAN}{buyer_data['name']}{RESET} for the month of {CYAN}{billable_month_text}{RESET}, due {CYAN}{doc_data['due_date']}{RESET} ===")
-    doc_params = {'table_header_fillcolor': invoice_data['accent_fill_color']} # see other modifable style parameters in docx_invoice.py
+    doc_params = {'table_header_fillcolor': invoice_data['accent_fill_color']} # see other modifiable style parameters in docx_invoice.py
 
-    invoicing.fill_word_invoice(template_path, docx_path, doc_data, doc_params)
+    doc_totals = invoicing.fill_word_invoice(template_path, docx_path, doc_data, doc_params)
     if invoicing.convert_docx_to_pdf(docx_path, pdf_path):
         invoicing.generate_en16931_invoice(xml_path, invoice_data, seller_data, buyer_data, pdf_filename=pdf_path)
     else:
@@ -143,14 +154,20 @@ def generate_complete_invoice(hours_worked, delivery_royalties, template_path='t
         xml_path = xml_path_raw  # use this for further validation
 
     # generate without pdf in any case
-    invoicing.generate_en16931_invoice(xml_path_raw, invoice_data, seller_data, buyer_data)
+    xml_totals = invoicing.generate_en16931_invoice(xml_path_raw, invoice_data, seller_data, buyer_data)
 
-    # validate against UBL-2.1 schema. This enforces basic elements, but EN 19361 is stricter and PEPPOL has additional requirements.
+    # verify that the docx and XML invoices produced the same totals
+    if doc_totals and xml_totals:
+        for key in ('total_excl_vat', 'total_vat', 'total_incl_vat'):
+            if abs(doc_totals[key] - xml_totals[key]) > 0.01:
+                print(f"⚠️  WARNING: {key} mismatch between DOCX ({doc_totals[key]}) and XML ({xml_totals[key]})")
+
+    # validate against UBL-2.1 schema. This enforces basic elements, but EN 16931 is stricter and PEPPOL has additional requirements.
     # (You need to use an online (or Java-based) check for those. See validate_invoice.py)
     schema_path = "UBL-2.1/schemas/UBL-Invoice-2.1.xsd"
     succeeded, errors = invoicing.validate_invoice(xml_path, schema_path)
     if succeeded:
-        print(f"✅ {xml_path} is valid against UBL-2.1 standard. EN19631 and PEPPOL are unconfirmed.")
+        print(f"✅ {xml_path} is valid against UBL-2.1 standard. EN16931 and PEPPOL are unconfirmed.")
     else:
         print(f"❌ {xml_path} has validation errors against the UBL-2.1 standard:")
         for e in errors:
@@ -161,12 +178,12 @@ def generate_complete_invoice(hours_worked, delivery_royalties, template_path='t
 
 if __name__ == "__main__":
     if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help'):
-        print("Usage: python invoice_myclient.py <hours_worked> [delivery_royalties (0)]")
+        print("Usage: python examples/example_invoice.py <hours_worked> [delivery_royalties (0)]")
         sys.exit(1)
 
     args = sys.argv[1:]
-    royalties=0.0
+    royalties = 0.0
     if len(args) >= 2:
-        royalties_pct = float(args[1])
+        royalties = float(args[1])
 
     generate_complete_invoice(float(args[0]), royalties)
