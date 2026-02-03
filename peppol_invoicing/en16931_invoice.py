@@ -15,7 +15,7 @@ import base64
 import os
 from decimal import Decimal
 
-from invoicing import RED, RESET, format_currency
+from .utils import RED, RESET, format_currency
 
 # --- Define Namespace URIs ---
 NS_INVOICE = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"

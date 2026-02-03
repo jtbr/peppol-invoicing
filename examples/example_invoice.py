@@ -6,8 +6,8 @@ import sys
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
-import invoicing # a local import
-from invoicing import CYAN, RESET
+import peppol_invoicing as invoicing
+from peppol_invoicing import CYAN, RESET
 
 INVOICE_PATH = "invoices"
 

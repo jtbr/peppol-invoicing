@@ -4,10 +4,13 @@ A Python library for generating EN16931-compliant e-invoices and human-readable 
 
 Since January 2026, Belgian B2B invoices must be issued as structured e-invoices conforming to the [EN16931](https://ec.europa.eu/digital-building-blocks/sites/display/DIGITAL/EN16931) European standard. Commercial invoicing platforms charge ongoing fees for this. This library provides a free, open-source alternative: generate both the machine-readable XML e-invoice and a matching human-readable PDF, with correct VAT handling for domestic, intra-EU, and international clients.
 
+**Caveat:** The authors are not accountants or tax advisors -- you are responsible for ensuring your invoices comply with applicable tax laws and regulations, and reflect your actual business transactions. If you are unsure about any aspect of your invoice, contact a professional.
+
 ### Features
 
 - **EN16931 / UBL 2.1 / PEPPOL BIS 3.0** compliant XML e-invoice generation
-- **Human-readable DOCX/PDF invoices** from customizable Word templates (This function may also be used standalone, even for non-EU businesses)
+- **Human-readable DOCX/PDF invoices** from customizable Word templates
+  - This function may also be used standalone, even for non-EU businesses not interested in Peppol or VAT handling
 - **Automatic VAT determination**: standard rated (domestic), reverse charge (intra-EU), or out-of-scope (non-EU)
 - **PDF embedding** into the XML e-invoice for a single self-contained file
 - **UBL schema validation** of generated invoices
@@ -54,7 +57,7 @@ Unusual customer street addresses (like PO Boxes) may need code changes to work 
 #### Requirements
 
 ```bash
-pip install peppol-invoice
+pip install peppol-invoicing
 ```
 
 [LibreOffice](https://www.libreoffice.org/download/download/) must be installed for DOCX-to-PDF conversion.
@@ -85,6 +88,6 @@ In either case, multiple small costs can be regrouped into one "Reimbursible exp
 
 ## Disclaimer
 
-This is free software. We hope it is useful, but it comes without any warranty whatsoever. You must do your own due diligence. Although it seems to work well for our purposes, we are not experts in finance or accounting, and we make no claims about the suitability of this software for any purpose.
+This is free software under the MIT license. We hope it is useful, but it comes without any warranty whatsoever. You must do your own due diligence. Although it seems to work well for us, we make no claims about the suitability of this software for any purpose.
 
 If you find any bugs or have any suggestions, please report them on the issue tracker

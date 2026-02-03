@@ -13,7 +13,7 @@ import sys
 import requests
 from lxml import etree
 
-import invoicing  # local import
+from . import utils as _utils
 
 # ----------- CONFIG ----------------
 PEPPOL_ENDPOINT_URL = "https://your-access-point.example.com/as4"  # Replace with your AP
@@ -43,5 +43,5 @@ if __name__ == "__main__":
 
     xml_path = sys.argv[1]
     xsd_path = sys.argv[2]
-    invoicing.validate_invoice(xml_path, xsd_path)
+    _utils.validate_invoice(xml_path, xsd_path)
     send_invoice(xml_path)

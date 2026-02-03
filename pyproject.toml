@@ -1,9 +1,11 @@
 [tool.poetry]
-name = "invoicing"
+name = "peppol-invoicing"
 version = "0.1.0"
-description = "Automated Peppol- and EN16931- compliant invoicing, along with PDFs"
+description = "Generate EN16931-compliant e-invoices and human-readable PDF invoices"
 authors = ["jtbr <jtbr@users.noreply.github.com>"]
 readme = "README.md"
+license = "MIT"
+packages = [{include = "peppol_invoicing"}]
 
 [tool.poetry.dependencies]
 python = ">=3.10"
@@ -13,8 +15,7 @@ python-docx = "^1.2"
 requests = {version = "^2.31", optional = true}
 
 [tool.poetry.extras]
-odoo = ["requests"]
-peppol = ["requests"]
+peppol-sending = ["requests"]
 
 [build-system]
 requires = ["poetry-core"]

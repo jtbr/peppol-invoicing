@@ -27,8 +27,8 @@ from docx.oxml import OxmlElement
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
-import invoicing  # local
-from invoicing import RED, RESET, format_currency as fmtc
+from . import utils as _utils
+from .utils import RED, RESET, format_currency as fmtc
 from decimal import Decimal
 
 def fill_word_invoice(template_path, output_path, data, params = None):
@@ -140,7 +140,7 @@ def fill_word_invoice(template_path, output_path, data, params = None):
 
                 item_subtotal = Decimal(item['quantity']) * Decimal(item['unit_price'])
                 item_total = item_subtotal * Decimal((100.0 + item['vat_pct']) / 100.0)
-                row_cells[4].text = invoicing.format_currency(item_total)
+                row_cells[4].text = _utils.format_currency(item_total)
                 pretax_total += item_subtotal
                 total += item_total
 
@@ -184,9 +184,9 @@ def fill_word_invoice(template_path, output_path, data, params = None):
         '[CLIENT_ADDRESS]': data['client_address'],
         '[CLIENT_VAT]': data['client_vat_line'],
         '[CLIENT_EMAIL]': data.get('client_email', ''),
-        '[SUBTOTAL]': invoicing.format_currency(pretax_total, data['currency'], cur1st),
-        '[VAT_TOTAL]': invoicing.format_currency(vat_total, data['currency'], cur1st),
-        '[TOTAL]': invoicing.format_currency(total, data['currency'], cur1st),
+        '[SUBTOTAL]': _utils.format_currency(pretax_total, data['currency'], cur1st),
+        '[VAT_TOTAL]': _utils.format_currency(vat_total, data['currency'], cur1st),
+        '[TOTAL]': _utils.format_currency(total, data['currency'], cur1st),
     }
 
     # handle credits, if any
@@ -195,9 +195,9 @@ def fill_word_invoice(template_path, output_path, data, params = None):
         amount_due_total -= Decimal(data['credit'])
         credit_fields = {
           '[CREDIT_TXT]': data['credit_text'],
-          '[CREDIT]': invoicing.format_currency(-data['credit'], data['currency'], cur1st),
+          '[CREDIT]': _utils.format_currency(-data['credit'], data['currency'], cur1st),
           '[AMOUNT_DUE_TXT]': data['amount_due_text'],
-          '[FINAL_TOTAL]': invoicing.format_currency(amount_due_total, data['currency'], cur1st),
+          '[FINAL_TOTAL]': _utils.format_currency(amount_due_total, data['currency'], cur1st),
         }
         if amount_due_total <= 0:
             notes = data.get('no_payment_text', '') + notes
@@ -223,7 +223,7 @@ def fill_word_invoice(template_path, output_path, data, params = None):
 # TODO: May want to remove due date and instead include payment terms.
 
 if __name__ == "__main__":
-    billable_month = invoicing.get_relevant_month().strftime("%B")
+    billable_month = _utils.get_relevant_month().strftime("%B")
 
     # Example usage
     invoice_data = {

@@ -8,7 +8,7 @@
 # phive validate -s ./schemas/PEPPOL-BIS-3.0 -i invoice.xml
 
 import sys
-import invoicing  # local import
+import peppol_invoicing as invoicing
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
