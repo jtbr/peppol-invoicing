@@ -45,6 +45,7 @@ Final PEPPOL/UBL/EN16931 validation (including against business rules) can be do
 
 - <https://ecosio.com/en/peppol-and-xml-document-validator/>
 - <https://app.b2brouter.net/en/validation>
+- <https://www.ubl.be/validator/>
 
 `peppol_invoice_sending.py` contains experimental code for sending XML invoices via a PEPPOL Access Point. This is untested and serves as a starting point. For production PEPPOL sending, consider [peppol-py](https://github.com/iterasdev/peppol-py) or a commercial Access Point provider.
 
@@ -89,8 +90,16 @@ Human-friendly invoices based on fully-customizable templates, like:
 ![Human readable invoices](examples/sample_invoice.png)
 
 
+## Limitations
+
+- **Validation**: The library validates against UBL 2.1 schema but not against EN16931 business rules (~150 rules) or PEPPOL-specific rules. Always validate invoices with an external validator (see links above) before use in production.
+- **VAT exemption text**: The default exemption reasons reference Belgian VAT Code articles. Sellers in other countries may need to customize these via the `reason` field in VAT details.
+- **Single VAT rate per invoice**: All line items receive the same VAT treatment (determined by buyer/seller countries). Mixed VAT rates on a single invoice are not currently supported.
+- **No prepayments or allowances**: Prepaid amounts, deposits, and document-level allowances/charges are not yet supported.
+- **No credit notes**: Credit notes (invoice type 381) are not yet supported.
+
 ## Disclaimer
 
 This is free software under the MIT license. We hope it is useful, but it comes without any warranty whatsoever. You must do your own due diligence. Although it seems to work well for us, we make no claims about the suitability of this software for any purpose.
 
-If you find any bugs or have any suggestions, please report them on the issue tracker
+If you find any bugs or have any suggestions, please report them on the issue tracker.

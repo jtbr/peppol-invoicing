@@ -34,6 +34,13 @@ from decimal import Decimal
 def fill_word_invoice(template_path, output_path, data, params = None):
     doc = Document(template_path)
 
+    # Check for essential placeholders in template
+    doc_text = '\n'.join(para.text for para in doc.paragraphs)
+    essential_placeholders = ['[ITEMS_TABLE]', '[INVOICE_NUMBER]', '[TOTAL]']
+    for placeholder in essential_placeholders:
+        if placeholder not in doc_text:
+            print(f"Warning: Template is missing placeholder '{placeholder}'")
+
     def replace_placeholder(paragraphs, replacements):
         for para in paragraphs:
             for key, val in replacements.items():
@@ -138,8 +145,8 @@ def fill_word_invoice(template_path, output_path, data, params = None):
                 row_cells[2].text = str(item['unit_price'])
                 row_cells[3].text = str(item['vat_pct']) + '%'
 
-                item_subtotal = Decimal(item.get('quantity', 1)) * Decimal(item['unit_price'])
-                item_total = item_subtotal * Decimal((100.0 + item['vat_pct']) / 100.0)
+                item_subtotal = Decimal(str(item.get('quantity', 1))) * Decimal(str(item['unit_price']))
+                item_total = item_subtotal * (Decimal(100) + Decimal(str(item['vat_pct']))) / Decimal(100)
                 row_cells[4].text = _utils.format_currency(item_total)
                 pretax_total += item_subtotal
                 total += item_total
@@ -189,33 +196,36 @@ def fill_word_invoice(template_path, output_path, data, params = None):
         '[TOTAL]': _utils.format_currency(total, data['currency'], cur1st),
     }
 
-    # handle credits, if any
-    amount_due_total = total
-    if data.get('credit'):
-        amount_due_total -= Decimal(data['credit'])
-        credit_fields = {
-          '[CREDIT_TXT]': data['credit_text'],
-          '[CREDIT]': _utils.format_currency(-data['credit'], data['currency'], cur1st),
-          '[AMOUNT_DUE_TXT]': data['amount_due_text'],
-          '[FINAL_TOTAL]': _utils.format_currency(amount_due_total, data['currency'], cur1st),
-        }
-        if amount_due_total <= 0:
-            notes = data.get('no_payment_text', '') + notes
-    else:
-        credit_fields = {
-          '[CREDIT_TXT]': '',
-          '[CREDIT]': '',
-          '[AMOUNT_DUE_TXT]': '',
-          '[FINAL_TOTAL]': ''
-        }
-    replacements |= credit_fields
+    # TODO: Prepayments/credits/allowances are not yet supported in either DOCX or XML generation.
+    # Supporting this would require: PrepaidAmount in XML LegalMonetaryTotal, template placeholders
+    # that can be cleanly removed when not used, and matching logic in both generators.
+    # # handle credits, if any
+    # amount_due_total = total
+    # if data.get('credit'):
+    #     amount_due_total -= Decimal(str(data['credit']))
+    #     credit_fields = {
+    #       '[CREDIT_TXT]': data['credit_text'],
+    #       '[CREDIT]': _utils.format_currency(-data['credit'], data['currency'], cur1st),
+    #       '[AMOUNT_DUE_TXT]': data['amount_due_text'],
+    #       '[FINAL_TOTAL]': _utils.format_currency(amount_due_total, data['currency'], cur1st),
+    #     }
+    #     if amount_due_total <= 0:
+    #         notes = data.get('no_payment_text', '') + notes
+    # else:
+    #     credit_fields = {
+    #       '[CREDIT_TXT]': '',
+    #       '[CREDIT]': '',
+    #       '[AMOUNT_DUE_TXT]': '',
+    #       '[FINAL_TOTAL]': ''
+    #     }
+    # replacements |= credit_fields
     replacements['[NOTES]'] = notes
 
     replace_placeholder(doc.paragraphs, replacements)
 
     doc.save(output_path)
 
-    print(f"✅ Word-format invoice generated, with total: {RED}{total}{RESET}, amount due: {RED}{amount_due_total}{RESET}")
+    print(f"✅ Word-format invoice generated, with total: {RED}{total}{RESET}")
 
     return {'total_excl_vat': pretax_total, 'total_vat': vat_total, 'total_incl_vat': total}
 

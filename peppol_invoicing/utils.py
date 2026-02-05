@@ -26,7 +26,9 @@ def format_currency(amount:int|float|Decimal, currency_symbol:str='', currency_f
     Formats a Decimal or number to a string with 2 decimal places.
     If provided, includes the currency symbol (eg, '$', 'EUR', etc) before or after the number
     """
-    currency_text = f"{Decimal(amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):.2f}"
+    # Convert via str() to avoid float precision issues (e.g., Decimal(0.1) != Decimal('0.1'))
+    amount_dec = Decimal(str(amount)) if not isinstance(amount, Decimal) else amount
+    currency_text = f"{amount_dec.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):.2f}"
     if currency_symbol:
         return f"{currency_symbol} {currency_text}" if currency_first else f"{currency_text} {currency_symbol}"
     else:

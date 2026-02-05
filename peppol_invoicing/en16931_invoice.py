@@ -13,9 +13,14 @@ import sys
 import re
 import base64
 import os
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from .utils import RED, RESET, format_currency
+
+
+class InvoiceValidationError(Exception):
+    """Raised when invoice data fails validation."""
+    pass
 
 # --- Define Namespace URIs ---
 NS_INVOICE = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
@@ -101,9 +106,9 @@ def create_party(parent_element, party_type, party_data, invoice_vat_context):
             if scheme_id and endpoint_id_val: # Ensure both parts are non-empty
                 etree.SubElement(party, E("EndpointID", NS_CBC), schemeID=scheme_id).text = endpoint_id_val
             else:
-                print(f"ERROR: Invalid endpoint format for {party_type} '{name}'. Scheme or ID part missing in '{endpoint}'.", file=sys.stderr); sys.exit(1)
+                raise InvoiceValidationError(f"Invalid endpoint format for {party_type} '{name}'. Scheme or ID part missing in '{endpoint}'.")
         else:
-            print(f"ERROR: Invalid endpoint format for {party_type} '{name}'. Expected 'schemeID:ID', got '{endpoint}'.", file=sys.stderr); sys.exit(1)
+            raise InvoiceValidationError(f"Invalid endpoint format for {party_type} '{name}'. Expected 'schemeID:ID', got '{endpoint}'.")
     else:
         # Required by Peppol, but ok if we want e-invoices but aren't sending via PEPPOL
         print(f"Warning: PEPPOL {party_type} Endpoint is missing for {name}; fine for non-BE clients.")
@@ -163,8 +168,7 @@ def create_party(parent_element, party_type, party_data, invoice_vat_context):
         etree.SubElement(legal_entity, E("CompanyID", NS_CBC)).text = legal_reg_id
     elif party_type == "AccountingSupplierParty" and omit_vat_id:
         # If seller VAT was omitted due to 'O', BT-30 becomes mandatory for BR-CO-26
-        print(f"ERROR: Seller Legal Registration ID (legal_registration_id) missing in seller_data. Required by BR-CO-26 when VAT ID is omitted (e.g., for 'Outside Scope' invoices).", file=sys.stderr)
-        sys.exit(1)
+        raise InvoiceValidationError("Seller Legal Registration ID (legal_registration_id) missing in seller_data. Required by BR-CO-26 when VAT ID is omitted (e.g., for 'Outside Scope' invoices).")
 
     if 'contact_email' in party_data and party_data['contact_email']:
         contact = etree.SubElement(party, E("Contact", NS_CAC))
@@ -180,20 +184,22 @@ def create_invoice_line(parent, line_id, item_data, currency, line_vat_details,
     seller_vat_rate/seller_vat_category override the defaults for the ClassifiedTaxCategory.
     """
     desc = item_data.get('description', 'N/A')
-    price = Decimal(item_data.get('unit_price', 0))  # TODO, allow 0?
+    price = Decimal(str(item_data.get('unit_price', 0)))
+    if price == 0:
+        print(f"Warning: Line item '{desc}' has unit_price of 0.")
     if 'quantity' in item_data:
-        qty = Decimal(item_data.get('quantity', 1))
+        qty = Decimal(str(item_data.get('quantity', 1)))
         unit_code = item_data.get('unit_code', 'EA') # C62=unitless (lump sum); HUR=hours; EA=each
     else:
         unit_code = item_data.get('unit_code', 'C62')  # unitless, e.g. lump sum
-        qty = 1
+        qty = Decimal(1)
 
     applied_vat_rate = line_vat_details['rate']
     applied_tax_cat_id = line_vat_details['category_code']
     vat_reason = line_vat_details.get('reason')
 
-    line_subtotal = qty * price
-    line_vat_amount = line_subtotal * (applied_vat_rate / Decimal(100))
+    line_subtotal = (qty * price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    line_vat_amount = (line_subtotal * applied_vat_rate / Decimal(100)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
     line = etree.SubElement(parent, E("InvoiceLine", NS_CAC))
     etree.SubElement(line, E("ID", NS_CBC)).text = str(line_id)
@@ -292,11 +298,9 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
 
     # --- Essential Data Checks ---
     if not invoice_data.get('items') or not isinstance(invoice_data['items'], list):
-        print("ERROR: Invoice data must contain a non-empty list of 'items'.", file=sys.stderr)
-        sys.exit(1)
+        raise InvoiceValidationError("Invoice data must contain a non-empty list of 'items'.")
     if not invoice_data.get('invoice_number'):
-        print("ERROR: Invoice data must contain 'invoice_number'.", file=sys.stderr)
-        sys.exit(1)
+        raise InvoiceValidationError("Invoice data must contain 'invoice_number'.")
     # Add more checks as needed (dates, currency, party data etc.)
 
     invoice_number = invoice_data['invoice_number']
@@ -411,10 +415,10 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
     applied_tax_breakdown = {}
 
     for item in invoice_data['items']: # Assumes items list exists due to check above
-        qty = Decimal(item.get('quantity', 1))
-        price = Decimal(item.get('unit_price', 0))
-        line_subtotal = qty * price
-        line_vat = line_subtotal * (applied_vat_details['rate'] / Decimal(100))
+        qty = Decimal(str(item.get('quantity', 1)))
+        price = Decimal(str(item.get('unit_price', 0)))
+        line_subtotal = (qty * price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        line_vat = (line_subtotal * applied_vat_details['rate'] / Decimal(100)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         total_line_extension_amount += line_subtotal
         total_tax_amount += line_vat
