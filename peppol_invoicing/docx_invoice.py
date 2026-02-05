@@ -27,9 +27,9 @@ from docx.oxml import OxmlElement
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
-from . import utils as _utils
-from .utils import RED, RESET, format_currency as fmtc
-from decimal import Decimal
+from .utils import (RED, RESET, format_currency, get_decimal_quantizer, get_currency_symbol,
+                    get_relevant_month)
+from decimal import Decimal, ROUND_HALF_UP
 
 def fill_word_invoice(template_path, output_path, data, params = None):
     doc = Document(template_path)
@@ -63,9 +63,15 @@ def fill_word_invoice(template_path, output_path, data, params = None):
     params = default_params | (params if params else {})  # overrides any or all default parameters
     cur1st = params['currency_as_prefix']
 
+    # Currency handling: data['currency'] is ISO 4217 code (e.g., 'EUR', 'USD')
+    # Optional data['currency_symbol'] overrides the auto-looked-up symbol
+    currency_code = data.get('currency', 'EUR')
+    currency_symbol = data['currency_symbol'] if 'currency_symbol' in data else get_currency_symbol(currency_code)
+    quantizer = get_decimal_quantizer(currency_code)
+
     # Replace table placeholder with real items table
-    pretax_total = Decimal(0.0)
-    total = Decimal(0.0)
+    pretax_total = Decimal(0)
+    total = Decimal(0)
     for i, para in enumerate(doc.paragraphs):
         if '[ITEMS_TABLE]' in para.text:
             table = doc.add_table(rows=1, cols=5)
@@ -115,7 +121,7 @@ def fill_word_invoice(template_path, output_path, data, params = None):
             hdr_cells[1].text = 'Qty'
             hdr_cells[2].text = 'Unit Price'
             hdr_cells[3].text = params['table_vat_header']
-            hdr_cells[4].text = f'Total ({data["currency"]})'
+            hdr_cells[4].text = f'Total ({currency_symbol})'
             for cn, cell in enumerate(hdr_cells):
                 cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
                 for paragraph in cell.paragraphs:
@@ -133,21 +139,22 @@ def fill_word_invoice(template_path, output_path, data, params = None):
                         run.font.bold = True
                 cell._tc.get_or_add_tcPr().append(OxmlElement('w:shd', {'{http://schemas.openxmlformats.org/wordprocessingml/2006/main}w': "clear", '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}color': "auto", '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}fill': params['table_header_fillcolor']}))
 
-            pretax_total = Decimal(0.0)
-            total = Decimal(0.0)
+            pretax_total = Decimal(0)
+            total = Decimal(0)
 
             for item in data['items']:
-                item_subtotal = Decimal(0.0)
-                item_total = Decimal(0.0)
                 row_cells = table.add_row().cells
                 row_cells[0].text = item['description']
                 row_cells[1].text = str(item.get('quantity', ''))
                 row_cells[2].text = str(item['unit_price'])
                 row_cells[3].text = str(item['vat_pct']) + '%'
 
-                item_subtotal = Decimal(str(item.get('quantity', 1))) * Decimal(str(item['unit_price']))
-                item_total = item_subtotal * (Decimal(100) + Decimal(str(item['vat_pct']))) / Decimal(100)
-                row_cells[4].text = _utils.format_currency(item_total)
+                qty = Decimal(str(item.get('quantity', 1)))
+                price = Decimal(str(item['unit_price']))
+                vat_pct = Decimal(str(item['vat_pct']))
+                item_subtotal = (qty * price).quantize(quantizer, rounding=ROUND_HALF_UP)
+                item_total = (item_subtotal * (Decimal(100) + vat_pct) / Decimal(100)).quantize(quantizer, rounding=ROUND_HALF_UP)
+                row_cells[4].text = format_currency(item_total, currency_symbol='', currency_code=currency_code)
                 pretax_total += item_subtotal
                 total += item_total
 
@@ -191,9 +198,9 @@ def fill_word_invoice(template_path, output_path, data, params = None):
         '[CLIENT_ADDRESS]': data['client_address'],
         '[CLIENT_VAT]': data['client_vat_line'],
         '[CLIENT_EMAIL]': data.get('client_email', ''),
-        '[SUBTOTAL]': _utils.format_currency(pretax_total, data['currency'], cur1st),
-        '[VAT_TOTAL]': _utils.format_currency(vat_total, data['currency'], cur1st),
-        '[TOTAL]': _utils.format_currency(total, data['currency'], cur1st),
+        '[SUBTOTAL]': format_currency(pretax_total, currency_symbol=currency_symbol, currency_first=cur1st, currency_code=currency_code),
+        '[VAT_TOTAL]': format_currency(vat_total, currency_symbol=currency_symbol, currency_first=cur1st, currency_code=currency_code),
+        '[TOTAL]': format_currency(total, currency_symbol=currency_symbol, currency_first=cur1st, currency_code=currency_code),
     }
 
     # TODO: Prepayments/credits/allowances are not yet supported in either DOCX or XML generation.
@@ -233,7 +240,7 @@ def fill_word_invoice(template_path, output_path, data, params = None):
 # TODO: May want to remove due date and instead include payment terms.
 
 if __name__ == "__main__":
-    billable_month = _utils.get_relevant_month().strftime("%B")
+    billable_month = get_relevant_month().strftime("%B")
 
     # Example usage
     invoice_data = {
@@ -244,7 +251,7 @@ if __name__ == "__main__":
         'client_address': '123 Main Street, Brussels, Belgium',
         'client_vat_line': 'VAT #: BE987654321',
         'client_email': 'info@acme.com',
-        'currency': '€',
+        'currency': 'EUR',
         'notes': 'This invoice is VAT exempt under Article 39 of the VAT Code. Copyright licensing and other terms are is pursuant to agreement dated 1 January 2020.',
         'items': [
             {'description': f'Consulting Services thru {billable_month} (hours)', 'quantity': 30, 'unit_price': 55, 'vat_pct': 0},

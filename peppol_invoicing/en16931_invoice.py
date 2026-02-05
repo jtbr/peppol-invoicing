@@ -15,7 +15,7 @@ import base64
 import os
 from decimal import Decimal, ROUND_HALF_UP
 
-from .utils import RED, RESET, format_currency
+from .utils import RED, RESET, format_currency, get_decimal_quantizer
 
 
 class InvoiceValidationError(Exception):
@@ -27,13 +27,58 @@ NS_INVOICE = "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
 NS_CAC = "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
 NS_CBC = "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
 
-# --- List of EU Member States ---
+# --- List of EU Member States (ISO 3166-1 alpha-2) ---
 EU_COUNTRY_CODES = ["AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK"]
 
+# --- ISO 3166-1 alpha-2 country codes (subset of commonly used codes for validation) ---
+# Full list has ~249 codes; this covers EU + major trading partners
+VALID_COUNTRY_CODES = EU_COUNTRY_CODES + [
+    "AD", "AL", "AM", "AO", "AR", "AU", "AZ", "BA", "BD", "BR", "BY", "CA", "CH", "CL", "CN", "CO",
+    "EG", "GB", "GE", "GH", "HK", "ID", "IL", "IN", "IS", "JP", "KE", "KR", "KZ", "LI", "MA", "MC",
+    "MD", "ME", "MK", "MX", "MY", "NG", "NO", "NZ", "PA", "PE", "PH", "PK", "RS", "RU", "SA", "SG",
+    "SM", "TH", "TR", "TW", "UA", "US", "VA", "VN", "ZA"
+]
+
+# --- ISO 4217 currency codes (subset of commonly used codes for validation) ---
+VALID_CURRENCY_CODES = [
+    "EUR", "USD", "GBP", "CHF", "JPY", "CNY", "AUD", "CAD", "HKD", "SGD", "SEK", "NOK", "DKK",
+    "NZD", "KRW", "INR", "BRL", "MXN", "ZAR", "PLN", "CZK", "HUF", "RON", "BGN", "HRK", "TRY", "RUB"
+]
+
 # --- Default Seller's Domestic Standard VAT Rate (Belgium) ---
-# These can be overridden per-invoice via seller_data['standard_vat_rate'] and seller_data['standard_vat_category']
+# BELGIAN-SPECIFIC: Default VAT rate is 21% (Belgium). Other EU countries have different standard rates.
+# Override via seller_data['standard_vat_rate'] for non-Belgian sellers.
 DEFAULT_VAT_RATE = Decimal("21.00")
 DEFAULT_VAT_CATEGORY = "S"
+
+# --- Date format validation (ISO 8601: YYYY-MM-DD) ---
+DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_date(date_str, field_name):
+    """Validates that a date string is in ISO 8601 format (YYYY-MM-DD)."""
+    if date_str and not DATE_PATTERN.match(date_str):
+        raise InvoiceValidationError(f"Invalid date format for '{field_name}': '{date_str}'. Expected YYYY-MM-DD.")
+
+
+def _validate_country_code(code, field_name):
+    """Validates that a country code is a known ISO 3166-1 alpha-2 code."""
+    if code:
+        code_upper = code.upper()
+        if len(code_upper) != 2:
+            raise InvoiceValidationError(f"Invalid country code for '{field_name}': '{code}'. Must be 2 characters.")
+        if code_upper not in VALID_COUNTRY_CODES:
+            print(f"Warning: Unrecognized country code '{code}' for '{field_name}'. Proceeding anyway.")
+
+
+def _validate_currency_code(code, field_name="currency"):
+    """Validates that a currency code is a known ISO 4217 code."""
+    if code:
+        code_upper = code.upper()
+        if len(code_upper) != 3:
+            raise InvoiceValidationError(f"Invalid currency code for '{field_name}': '{code}'. Must be 3 characters.")
+        if code_upper not in VALID_CURRENCY_CODES:
+            print(f"Warning: Unrecognized currency code '{code}' for '{field_name}'. Proceeding anyway.")
 
 # --- Helper function to create elements ---
 def E(tag, ns_uri):
@@ -47,14 +92,21 @@ def determine_vat_details(buyer_country, seller_country="BE", domestic_vat_rate=
     Determines VAT rate, category code, and reason based on buyer/seller countries.
 
     Args:
-        buyer_country: ISO country code of the buyer.
-        seller_country: ISO country code of the seller (default: "BE").
+        buyer_country: ISO 3166-1 alpha-2 country code of the buyer.
+        seller_country: ISO 3166-1 alpha-2 country code of the seller (default: "BE").
         domestic_vat_rate: Standard VAT rate for domestic sales (default: Belgium 21%).
         domestic_vat_category: VAT category code for domestic sales (default: "S").
 
     Returns:
         dict: {'rate': Decimal, 'category_code': str, 'reason': str | None}
+
+    Note:
+        BELGIAN-SPECIFIC: The exemption reason texts reference Belgian/EU VAT articles.
+        Sellers in other jurisdictions may need to override the 'reason' field.
     """
+    _validate_country_code(buyer_country, "buyer_country")
+    _validate_country_code(seller_country, "seller_country")
+
     if domestic_vat_rate is None:
         domestic_vat_rate = DEFAULT_VAT_RATE
     if domestic_vat_category is None:
@@ -69,16 +121,17 @@ def determine_vat_details(buyer_country, seller_country="BE", domestic_vat_rate=
         return {
             'rate': Decimal("0.00"),
             'category_code': "AE", # VAT reverse charged
-            # Standard text, check PEPPOL/local regulations for specific required text/code
+            # EU-WIDE: This text is standard for intra-EU B2B reverse charge
             'reason': "Reverse charge - Art 196 VAT Directive"
             # Optional: Reason Code (e.g., "VATEX-EU-AE") - BT-121
         }
     else:
         # Export outside EU -> Out of scope
+        # BELGIAN-SPECIFIC: "Article 39 of the VAT Code" refers to Belgian VAT Code.
+        # Other EU countries have equivalent articles in their national VAT legislation.
         return {
             'rate': Decimal("0.00"),
             'category_code': "O", # Service outside scope of tax
-            # Standard text, check PEPPOL/local regulations
             'reason': "Export outside the EU - Out of scope (Exempt under Article 39 of the VAT Code)"
             # Optional: Reason Code (e.g., "VATEX-EU-O") - BT-121
         }
@@ -99,6 +152,9 @@ def create_party(parent_element, party_type, party_data, invoice_vat_context):
     party = etree.SubElement(party_root, E("Party", NS_CAC))
 
     # --- PEPPOL Endpoint ID ---
+    # ASSUMPTION: Endpoint format is "schemeID:identifier" (e.g., "0208:0123456789" for Belgian KBO number).
+    # Common scheme IDs: 0208 (BE KBO/BCE), 0204 (DE VAT), 0088 (EAN/GLN), 0060 (DUNS), 9910 (test).
+    # See PEPPOL Policy for Identifiers for full list.
     if endpoint:
         match = re.match(r"^(.*?):(.*)$", endpoint)
         if match:
@@ -110,10 +166,10 @@ def create_party(parent_element, party_type, party_data, invoice_vat_context):
         else:
             raise InvoiceValidationError(f"Invalid endpoint format for {party_type} '{name}'. Expected 'schemeID:ID', got '{endpoint}'.")
     else:
-        # Required by Peppol, but ok if we want e-invoices but aren't sending via PEPPOL
-        print(f"Warning: PEPPOL {party_type} Endpoint is missing for {name}; fine for non-BE clients.")
-        # DUNS (schemeID="0060") is another option many non-EU companies will have
-        # include DUMMY (fallback) ID. This will not work for sending via PEPPOL, but should allow passing PEPPOL conformance tests and is fine if not actually sending that way.
+        # Required by PEPPOL for transmission, but OK to omit for e-invoices sent via other means
+        print(f"Warning: PEPPOL {party_type} Endpoint is missing for {name}; required for PEPPOL transmission.")
+        # FALLBACK: Use dummy endpoint to pass schema validation. Will NOT work for actual PEPPOL delivery.
+        # BRITTLE: This assumes the invoice won't actually be sent via PEPPOL without a real endpoint.
         etree.SubElement(party, E("EndpointID", NS_CBC), schemeID='9910').text = '9999999999999'
 
     # Party Name
@@ -198,15 +254,16 @@ def create_invoice_line(parent, line_id, item_data, currency, line_vat_details,
     applied_tax_cat_id = line_vat_details['category_code']
     vat_reason = line_vat_details.get('reason')
 
-    line_subtotal = (qty * price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-    line_vat_amount = (line_subtotal * applied_vat_rate / Decimal(100)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    quantizer = get_decimal_quantizer(currency)
+    line_subtotal = (qty * price).quantize(quantizer, rounding=ROUND_HALF_UP)
+    line_vat_amount = (line_subtotal * applied_vat_rate / Decimal(100)).quantize(quantizer, rounding=ROUND_HALF_UP)
 
     line = etree.SubElement(parent, E("InvoiceLine", NS_CAC))
     etree.SubElement(line, E("ID", NS_CBC)).text = str(line_id)
     qty_el = etree.SubElement(line, E("InvoicedQuantity", NS_CBC), unitCode=unit_code)
     qty_el.text = str(qty)
     line_ext_amt = etree.SubElement(line, E("LineExtensionAmount", NS_CBC), currencyID=currency)
-    line_ext_amt.text = format_currency(line_subtotal)
+    line_ext_amt.text = format_currency(line_subtotal, currency_symbol='', currency_code=currency)
 
     # Optional line-level invoice period (e.g. for retainers/fixed-fee services)
     line_period_start = item_data.get('period_start')
@@ -221,15 +278,15 @@ def create_invoice_line(parent, line_id, item_data, currency, line_vat_details,
     # --- Applied VAT on Line (BT-118 / TaxTotal) ---
     line_tax_total = etree.SubElement(line, E("TaxTotal", NS_CAC)) # Keep this structure, required by EN16931 (ignore UBL-CR-561)
     line_tax_amt = etree.SubElement(line_tax_total, E("TaxAmount", NS_CBC), currencyID=currency)
-    line_tax_amt.text = format_currency(line_vat_amount) # VAT amount for the line
+    line_tax_amt.text = format_currency(line_vat_amount, currency_symbol='', currency_code=currency)
 
     # TaxSubtotal is optional within Line TaxTotal per UBL, but often needed for clarity/validation
     # If included, it mirrors the line's tax.
     line_tax_subtotal = etree.SubElement(line_tax_total, E("TaxSubtotal", NS_CAC))
     line_taxable_amt = etree.SubElement(line_tax_subtotal, E("TaxableAmount", NS_CBC), currencyID=currency)
-    line_taxable_amt.text = format_currency(line_subtotal)
+    line_taxable_amt.text = format_currency(line_subtotal, currency_symbol='', currency_code=currency)
     line_tax_sub_amt = etree.SubElement(line_tax_subtotal, E("TaxAmount", NS_CBC), currencyID=currency)
-    line_tax_sub_amt.text = format_currency(line_vat_amount)
+    line_tax_sub_amt.text = format_currency(line_vat_amount, currency_symbol='', currency_code=currency)
 
     # The single Tax Category for this line
     tax_category = etree.SubElement(line_tax_subtotal, E("TaxCategory", NS_CAC))
@@ -263,7 +320,7 @@ def create_invoice_line(parent, line_id, item_data, currency, line_vat_details,
     # --- Price Details ---
     price_el = etree.SubElement(line, E("Price", NS_CAC))
     price_amt = etree.SubElement(price_el, E("PriceAmount", NS_CBC), currencyID=currency)
-    price_amt.text = format_currency(price)
+    price_amt.text = format_currency(price, currency_symbol='', currency_code=currency)
     base_qty = etree.SubElement(price_el, E("BaseQuantity", NS_CBC), unitCode=unit_code)
     base_qty.text = str(item_data.get('base_quantity', '1'))
 
@@ -301,10 +358,19 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
         raise InvoiceValidationError("Invoice data must contain a non-empty list of 'items'.")
     if not invoice_data.get('invoice_number'):
         raise InvoiceValidationError("Invoice data must contain 'invoice_number'.")
-    # Add more checks as needed (dates, currency, party data etc.)
+
+    # Validate date formats (ISO 8601: YYYY-MM-DD)
+    _validate_date(invoice_data.get('date'), 'date')
+    _validate_date(invoice_data.get('due_date'), 'due_date')
+    _validate_date(invoice_data.get('invoice_period_start_date'), 'invoice_period_start_date')
+    _validate_date(invoice_data.get('invoice_period_end_date'), 'invoice_period_end_date')
+    _validate_date(invoice_data.get('contract_issue_date'), 'contract_issue_date')
+
+    # Validate currency code
+    currency = invoice_data.get('currency', 'EUR')
+    _validate_currency_code(currency)
 
     invoice_number = invoice_data['invoice_number']
-    currency = invoice_data.get('currency', 'EUR')
 
     # Allow seller_data to override default VAT rate/category
     seller_vat_rate = seller_data.get('standard_vat_rate')
@@ -384,15 +450,18 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
     create_party(Invoice, "AccountingCustomerParty", buyer_data, invoice_vat_context)
 
     # --- Payment Means ---
+    # ASSUMPTION: Only SEPA (IBAN) or US ACH/wire payment methods are supported.
+    # Other payment methods (PayPal, credit card, etc.) would need additional code.
+    # BELGIAN/EU-SPECIFIC: SEPA is standard for EU; code 31 = credit transfer.
+    # Code 30 would be used for structured Belgian payment references (+++123/1234/12345+++).
     if 'iban' in seller_data and seller_data['iban']:
-        # Uses code 31; 30 is for structured reference like +++123/12441/14124+++
         create_payment_means(Invoice, "31", "Credit transfer via SEPA",
                              seller_data['iban'], seller_data['name'],
                              seller_data.get('bic'),
                              pmt_ref = invoice_data['invoice_number'])
     elif all(k in seller_data for k in ['ach_account', 'ach_routing', 'ach_bank_name']):
-        # Uses code 42 for ACH Transfer or wire (either domestic or via SWIFT)
-        # to support international wire via SWIFT, simply change the ACH routing number to the SWIFT/BIC code of the bank
+        # US-SPECIFIC: ACH transfer or domestic wire. Code 42 = payment to bank account.
+        # For international wire via SWIFT, use the SWIFT/BIC code as the routing number.
         create_payment_means(Invoice, "42", "Payment to bank account via ACH transfer or US-domestic wire",
                              seller_data['ach_account'], seller_data['name'],
                              seller_data['ach_routing'], seller_data['ach_bank_name'],
@@ -413,12 +482,13 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
     total_tax_amount = Decimal(0)
     # Breakdown for Document TaxTotal - based on APPLIED categories
     applied_tax_breakdown = {}
+    quantizer = get_decimal_quantizer(currency)
 
     for item in invoice_data['items']: # Assumes items list exists due to check above
         qty = Decimal(str(item.get('quantity', 1)))
         price = Decimal(str(item.get('unit_price', 0)))
-        line_subtotal = (qty * price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        line_vat = (line_subtotal * applied_vat_details['rate'] / Decimal(100)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        line_subtotal = (qty * price).quantize(quantizer, rounding=ROUND_HALF_UP)
+        line_vat = (line_subtotal * applied_vat_details['rate'] / Decimal(100)).quantize(quantizer, rounding=ROUND_HALF_UP)
 
         total_line_extension_amount += line_subtotal
         total_tax_amount += line_vat
@@ -442,15 +512,15 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
 
     # --- TAX TOTAL (Document Level - Simplified Logic) ---
     tax_total = etree.SubElement(Invoice, E("TaxTotal", NS_CAC))
-    etree.SubElement(tax_total, E("TaxAmount", NS_CBC), currencyID=currency).text = format_currency(total_tax_amount)
+    etree.SubElement(tax_total, E("TaxAmount", NS_CBC), currencyID=currency).text = format_currency(total_tax_amount, currency_symbol='', currency_code=currency)
 
     # Generate breakdown ONLY for the APPLIED VAT categories found
     for cat_code, totals in sorted(applied_tax_breakdown.items()):
         tax_subtotal = etree.SubElement(tax_total, E("TaxSubtotal", NS_CAC))
         # Taxable amount MUST match sum of lines where this category was APPLIED
-        etree.SubElement(tax_subtotal, E("TaxableAmount", NS_CBC), currencyID=currency).text = format_currency(totals['taxable'])
+        etree.SubElement(tax_subtotal, E("TaxableAmount", NS_CBC), currencyID=currency).text = format_currency(totals['taxable'], currency_symbol='', currency_code=currency)
         # Tax amount MUST be calculated correctly
-        etree.SubElement(tax_subtotal, E("TaxAmount", NS_CBC), currencyID=currency).text = format_currency(totals['tax'])
+        etree.SubElement(tax_subtotal, E("TaxAmount", NS_CBC), currencyID=currency).text = format_currency(totals['tax'], currency_symbol='', currency_code=currency)
         # Tax Category details
         tax_category = etree.SubElement(tax_subtotal, E("TaxCategory", NS_CAC))
         etree.SubElement(tax_category, E("ID", NS_CBC)).text = cat_code # 'S', 'AE', or 'O'
@@ -479,10 +549,10 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
 
     # --- LEGAL MONETARY TOTAL ---
     legal_monetary = etree.SubElement(Invoice, E("LegalMonetaryTotal", NS_CAC))
-    etree.SubElement(legal_monetary, E("LineExtensionAmount", NS_CBC), currencyID=currency).text = format_currency(total_line_extension_amount)
-    etree.SubElement(legal_monetary, E("TaxExclusiveAmount", NS_CBC), currencyID=currency).text = format_currency(total_tax_exclusive)
-    etree.SubElement(legal_monetary, E("TaxInclusiveAmount", NS_CBC), currencyID=currency).text = format_currency(total_tax_inclusive)
-    etree.SubElement(legal_monetary, E("PayableAmount", NS_CBC), currencyID=currency).text = format_currency(total_payable)
+    etree.SubElement(legal_monetary, E("LineExtensionAmount", NS_CBC), currencyID=currency).text = format_currency(total_line_extension_amount, currency_symbol='', currency_code=currency)
+    etree.SubElement(legal_monetary, E("TaxExclusiveAmount", NS_CBC), currencyID=currency).text = format_currency(total_tax_exclusive, currency_symbol='', currency_code=currency)
+    etree.SubElement(legal_monetary, E("TaxInclusiveAmount", NS_CBC), currencyID=currency).text = format_currency(total_tax_inclusive, currency_symbol='', currency_code=currency)
+    etree.SubElement(legal_monetary, E("PayableAmount", NS_CBC), currencyID=currency).text = format_currency(total_payable, currency_symbol='', currency_code=currency)
 
     # --- INVOICE LINES ---
     current_line_id = 0

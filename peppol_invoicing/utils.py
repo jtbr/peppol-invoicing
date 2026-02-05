@@ -20,17 +20,111 @@ CYAN = "\033[36m"
 # colors for print. eg: print(f"This is {RED}red hot{RESET}.")
 
 
+# --- Currency data: decimal places (ISO 4217) and symbols ---
+# Decimal places per currency (0, 2, or 3). Default is 2 if not listed.
+# Source: https://docs.adyen.com/development-resources/currency-codes/
+CURRENCY_DECIMALS = {
+    # 0 decimal places (no minor unit)
+    'BIF': 0, 'CLP': 0, 'DJF': 0, 'GNF': 0, 'ISK': 0, 'JPY': 0, 'KMF': 0,
+    'KRW': 0, 'PYG': 0, 'RWF': 0, 'UGX': 0, 'VND': 0, 'VUV': 0, 'XAF': 0,
+    'XOF': 0, 'XPF': 0,
+    # 3 decimal places
+    'BHD': 3, 'IQD': 3, 'JOD': 3, 'KWD': 3, 'LYD': 3, 'OMR': 3, 'TND': 3,
+    # All others default to 2
+}
+
+# Currency symbols. Default to ISO code if not listed.
+# Source: https://www.xe.com/symbols/
+CURRENCY_SYMBOLS = {
+    'AED': 'د.إ', 'AFN': '؋', 'ALL': 'L', 'AMD': '֏', 'ANG': 'ƒ',
+    'ARS': '$', 'AUD': 'A$', 'AWG': 'ƒ', 'AZN': '₼',
+    'BAM': 'KM', 'BBD': '$', 'BDT': '৳', 'BGN': 'лв', 'BHD': '.د.ب',
+    'BMD': '$', 'BND': '$', 'BOB': '$b', 'BRL': 'R$', 'BSD': '$',
+    'BWP': 'P', 'BYN': 'Br', 'BZD': 'BZ$',
+    'CAD': 'C$', 'CHF': 'CHF', 'CLP': '$', 'CNY': '¥', 'COP': '$',
+    'CRC': '₡', 'CUP': '₱', 'CZK': 'Kč',
+    'DKK': 'kr', 'DOP': 'RD$',
+    'EGP': '£', 'EUR': '€',
+    'FJD': '$', 'FKP': '£',
+    'GBP': '£', 'GEL': '₾', 'GHS': '¢', 'GIP': '£', 'GTQ': 'Q', 'GYD': '$',
+    'HKD': 'HK$', 'HNL': 'L', 'HRK': 'kn', 'HUF': 'Ft',
+    'IDR': 'Rp', 'ILS': '₪', 'INR': '₹', 'IRR': '﷼', 'ISK': 'kr',
+    'JMD': 'J$', 'JPY': '¥',
+    'KES': 'KSh', 'KGS': 'лв', 'KHR': '៛', 'KRW': '₩', 'KYD': '$', 'KZT': '₸',
+    'LAK': '₭', 'LBP': '£', 'LKR': '₨', 'LRD': '$',
+    'MKD': 'ден', 'MNT': '₮', 'MUR': '₨', 'MVR': 'Rf', 'MXN': '$', 'MYR': 'RM', 'MZN': 'MT',
+    'NAD': '$', 'NGN': '₦', 'NIO': 'C$', 'NOK': 'kr', 'NPR': '₨', 'NZD': 'NZ$',
+    'OMR': '﷼',
+    'PAB': 'B/.', 'PEN': 'S/.', 'PHP': '₱', 'PKR': '₨', 'PLN': 'zł', 'PYG': 'Gs',
+    'QAR': '﷼',
+    'RON': 'lei', 'RSD': 'Дин.', 'RUB': '₽',
+    'SAR': '﷼', 'SBD': '$', 'SCR': '₨', 'SEK': 'kr', 'SGD': 'S$', 'SHP': '£',
+    'SOS': 'S', 'SRD': '$', 'SYP': '£', 'SZL': 'E',
+    'THB': '฿', 'TRY': '₺', 'TTD': 'TT$', 'TWD': 'NT$', 'TZS': 'TSh',
+    'UAH': '₴', 'USD': '$', 'UYU': '$U', 'UZS': 'лв',
+    'VEF': 'Bs', 'VND': '₫',
+    'XCD': '$',
+    'YER': '﷼',
+    'ZAR': 'R', 'ZMW': 'ZK', 'ZWD': 'Z$',
+}
+
+
+def get_currency_decimals(currency_code: str) -> int:
+    """Returns the number of decimal places for a currency (ISO 4217). Default is 2."""
+    return CURRENCY_DECIMALS.get(currency_code.upper(), 2)
+
+
+def get_currency_symbol(currency_code: str) -> str:
+    """Returns the symbol for a currency code, or the code itself if no symbol is defined."""
+    return CURRENCY_SYMBOLS.get(currency_code.upper(), currency_code.upper())
+
+
+def get_decimal_quantizer(currency_code: str) -> Decimal:
+    """Returns a Decimal quantizer string for the given currency (e.g., '0.01' for 2 decimals)."""
+    decimals = get_currency_decimals(currency_code)
+    if decimals == 0:
+        return Decimal('1')
+    else:
+        return Decimal('0.' + '0' * decimals)
+
+
 # --- Helper function to format currency ---
-def format_currency(amount:int|float|Decimal, currency_symbol:str='', currency_first:bool=False):
+def format_currency(amount: int|float|Decimal, currency_symbol: str | None = None, currency_first: bool = True,
+                    currency_code: str = None) -> str:
     """
-    Formats a Decimal or number to a string with 2 decimal places.
-    If provided, includes the currency symbol (eg, '$', 'EUR', etc) before or after the number
+    Formats a Decimal or number to a string with the appropriate decimal places.
+
+    Args:
+        amount: The numeric amount to format.
+        currency_symbol: Symbol to display (e.g., '$', '€'). If None and currency_code provided,
+                        looks up the symbol automatically. If empty string '', no symbol is included.
+        currency_first: If True, symbol appears before the number (default). If False, after.
+        currency_code: ISO 4217 currency code (e.g., 'EUR', 'USD'). Used to determine decimal
+                      places and look up symbol if currency_symbol is None.
+
+    Returns:
+        Formatted currency string.
     """
     # Convert via str() to avoid float precision issues (e.g., Decimal(0.1) != Decimal('0.1'))
     amount_dec = Decimal(str(amount)) if not isinstance(amount, Decimal) else amount
-    currency_text = f"{amount_dec.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP):.2f}"
+
+    # Determine decimal places
+    if currency_code:
+        quantizer = get_decimal_quantizer(currency_code)
+        decimals = get_currency_decimals(currency_code)
+    else:
+        quantizer = Decimal('0.01')
+        decimals = 2
+
+    rounded = amount_dec.quantize(quantizer, rounding=ROUND_HALF_UP)
+    currency_text = f"{rounded:.{decimals}f}"
+
+    # Determine symbol: None means auto-lookup, '' means no symbol
+    if currency_symbol is None and currency_code:
+        currency_symbol = get_currency_symbol(currency_code)
+
     if currency_symbol:
-        return f"{currency_symbol} {currency_text}" if currency_first else f"{currency_text} {currency_symbol}"
+        return f"{currency_symbol}{currency_text}" if currency_first else f"{currency_text} {currency_symbol}" # uses no-break space if after
     else:
         return currency_text
 
