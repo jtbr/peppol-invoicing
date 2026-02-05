@@ -134,11 +134,11 @@ def fill_word_invoice(template_path, output_path, data, params = None):
                 item_total = Decimal(0.0)
                 row_cells = table.add_row().cells
                 row_cells[0].text = item['description']
-                row_cells[1].text = str(item['quantity'])
+                row_cells[1].text = str(item.get('quantity', ''))
                 row_cells[2].text = str(item['unit_price'])
                 row_cells[3].text = str(item['vat_pct']) + '%'
 
-                item_subtotal = Decimal(item['quantity']) * Decimal(item['unit_price'])
+                item_subtotal = Decimal(item.get('quantity', 1)) * Decimal(item['unit_price'])
                 item_total = item_subtotal * Decimal((100.0 + item['vat_pct']) / 100.0)
                 row_cells[4].text = _utils.format_currency(item_total)
                 pretax_total += item_subtotal

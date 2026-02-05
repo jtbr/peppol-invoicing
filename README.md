@@ -50,7 +50,7 @@ Final PEPPOL/UBL/EN16931 validation (including against business rules) can be do
 
 Invoices can also be validated manually via `validate_invoice.py`.
 
-The invoicing code handles VAT for domestic, intra-EU (reverse charge), and non-EU (out of scope) scenarios. The seller's standard domestic VAT rate defaults to Belgium's 21% but can be overridden via `seller_data['standard_vat_rate']`. Only labor items (and copyright royalties) are currently supported.
+The invoicing code handles VAT for domestic, intra-EU (reverse charge), and non-EU (out of scope) scenarios. The seller's standard domestic VAT rate defaults to Belgium's 21% but can be overridden via `seller_data['standard_vat_rate']`. Line items can be hourly (by using unit_code `HUR`), lump sum / fixed fee (unit_code `C62`, the default), or other UN/ECE Rec 20 unit codes. 'EA' is the default if quantity is provided, and if not, the line item is assumed to be unitless. An optional per-line invoice period (`period_start`, `period_end`) can be specified for retainers or fixed-fee services.
 
 Unusual customer street addresses (like PO Boxes) may need code changes to work perfectly.
 
@@ -63,28 +63,31 @@ pip install peppol-invoicing
 [LibreOffice](https://www.libreoffice.org/download/download/) must be installed for DOCX-to-PDF conversion.
 
 
-## Notes
+## Example outputs
 
-### Reimbursements of costs
-
-Need to be careful here, it's not so simple as in non-VAT countries. In the EU, they generally seem to want you to charge VAT on these. The software does not yet support anything here. In most cases you'd want to re-charge the fees with a markup, and then it is subject to VAT. Eg: "Travel expenses: flight and lodging reimbursement per agreement": Price, including markup, subject to normal VAT, quantity 1 (unit code C62).
-
-If it is a pure disbursement on the behalf of the client, this could be marked as out of VAT scope. The VAT category ID code would be O, percent 0.0. This is apparently heavily scrutinized in Belgium and you must have documentation showing the client is the legal debtor (the invoice is issued to the client).
-
-In deciding which is applicable, the key question is who is the beneficiary. Only if the client is the legal owner and direct user of the reibursable service can it be charged as out of scope, presuming you made the payment on their behalf.
-
-In either case, multiple small costs can be regrouped into one "Reimbursible expenses" line. It may be useful to attach supporting documents/receipts.
+XML e-Invoices like:
 ```xml
-<cac:AdditionalDocumentReference>
-  <cbc:ID>RECEIPT-123</cbc:ID>
-  <cbc:DocumentType>Reimbursement Receipt</cbc:DocumentType>
-  <cac:Attachment>
-    <cbc:EmbeddedDocumentBinaryObject mimeCode="application/pdf" filename="receipt.pdf" encodingCode="Base64">
-      JVBERi0xLjQK... (PDF content)
-    </cbc:EmbeddedDocumentBinaryObject>
-  </cac:Attachment>
-</cac:AdditionalDocumentReference>
+<?xml version='1.0' encoding='UTF-8'?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2" xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2" xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0</cbc:CustomizationID>
+  <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>
+  <cbc:ID>INV-2026-002</cbc:ID>
+  <cbc:IssueDate>2026-02-04</cbc:IssueDate>
+  <cbc:DueDate>2026-03-06</cbc:DueDate>
+  <cbc:InvoiceTypeCode>380</cbc:InvoiceTypeCode>
+  <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+  <cac:InvoicePeriod>
+    <cbc:StartDate>2026-01-01</cbc:StartDate>
+    <cbc:EndDate>2026-01-31</cbc:EndDate>
+    <cbc:Description>Services thru January</cbc:Description>
+  </cac:InvoicePeriod>
+  ...
+</Invoice>
 ```
+
+Human-friendly invoices based on fully-customizable templates, like:
+![Human readable invoices](examples/sample_invoice.png)
+
 
 ## Disclaimer
 

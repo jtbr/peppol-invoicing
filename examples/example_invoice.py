@@ -53,7 +53,8 @@ contract_data = {
     'currency': 'EUR',
     'hourly_rate': 25,
     'work_description': "Consulting Services",
-    'max_royalty_pct': 15
+    'max_royalty_pct': 15,
+    'monthly_retainer': 200
 }
 
 def generate_complete_invoice(hours_worked, delivery_royalties, template_path='templates/human_invoice_template.docx', term_days=30):
@@ -92,8 +93,10 @@ def generate_complete_invoice(hours_worked, delivery_royalties, template_path='t
         'items': [
             {'description': f"{contract_data['work_description']} thru {billable_month_text}", 'quantity': hours_worked,
              'unit_price': contract_data['hourly_rate'], 'unit_code': 'HUR'},
+            {'description': f"Retainer for {billable_month_text}", 'unit_price': contract_data['monthly_retainer']}, # no quantity => lump sum
+            {'description': f"Widgets", 'quantity': 12, 'unit_price': 35.50},
         ],
-        'accent_fill_color': '#158466'
+        'accent_fill_color': '#46a6af'
     }
     # include contract data like currency and contract ID for reference (not all fields are used)
     invoice_data |= contract_data
@@ -122,7 +125,7 @@ def generate_complete_invoice(hours_worked, delivery_royalties, template_path='t
     # modifications for docx: add vat_pct per item (XML handles this internally) and clarify descriptions
     for item in doc_data['items']:
         item['vat_pct'] = vat_rate
-        if item['unit_code'] == 'HUR':
+        if item.get('unit_code', '') == 'HUR':
             item['description'] += " (hours)"
 
     # VAT-specific notes for the invoice

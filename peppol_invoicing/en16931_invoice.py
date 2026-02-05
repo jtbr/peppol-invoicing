@@ -180,9 +180,13 @@ def create_invoice_line(parent, line_id, item_data, currency, line_vat_details,
     seller_vat_rate/seller_vat_category override the defaults for the ClassifiedTaxCategory.
     """
     desc = item_data.get('description', 'N/A')
-    qty = Decimal(item_data.get('quantity', 0))
-    price = Decimal(item_data.get('unit_price', 0))
-    unit_code = item_data.get('unit_code', 'C62' if qty == 1 else 'HUR') # 'EA' is an alternative, but C62 means "unitless, lump sum"
+    price = Decimal(item_data.get('unit_price', 0))  # TODO, allow 0?
+    if 'quantity' in item_data:
+        qty = Decimal(item_data.get('quantity', 1))
+        unit_code = item_data.get('unit_code', 'EA') # C62=unitless (lump sum); HUR=hours; EA=each
+    else:
+        unit_code = item_data.get('unit_code', 'C62')  # unitless, e.g. lump sum
+        qty = 1
 
     applied_vat_rate = line_vat_details['rate']
     applied_tax_cat_id = line_vat_details['category_code']
@@ -197,6 +201,16 @@ def create_invoice_line(parent, line_id, item_data, currency, line_vat_details,
     qty_el.text = str(qty)
     line_ext_amt = etree.SubElement(line, E("LineExtensionAmount", NS_CBC), currencyID=currency)
     line_ext_amt.text = format_currency(line_subtotal)
+
+    # Optional line-level invoice period (e.g. for retainers/fixed-fee services)
+    line_period_start = item_data.get('period_start')
+    line_period_end = item_data.get('period_end')
+    if line_period_start or line_period_end:
+        line_period = etree.SubElement(line, E("InvoicePeriod", NS_CAC))
+        if line_period_start:
+            etree.SubElement(line_period, E("StartDate", NS_CBC)).text = line_period_start
+        if line_period_end:
+            etree.SubElement(line_period, E("EndDate", NS_CBC)).text = line_period_end
 
     # --- Applied VAT on Line (BT-118 / TaxTotal) ---
     line_tax_total = etree.SubElement(line, E("TaxTotal", NS_CAC)) # Keep this structure, required by EN16931 (ignore UBL-CR-561)
@@ -307,7 +321,7 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
     etree.SubElement(Invoice, E("IssueDate", NS_CBC)).text = invoice_data['date']
     if 'due_date' in invoice_data:
         etree.SubElement(Invoice, E("DueDate", NS_CBC)).text = invoice_data['due_date']
-    etree.SubElement(Invoice, E("InvoiceTypeCode", NS_CBC)).text = invoice_data.get('invoice_type_code', "380")  # standard invoice: code 380
+    etree.SubElement(Invoice, E("InvoiceTypeCode", NS_CBC)).text = invoice_data.get('invoice_type_code', "380")  # standard commercial invoice: code 380
     etree.SubElement(Invoice, E("DocumentCurrencyCode", NS_CBC)).text = currency
 
     # --- Invoice Period ---
@@ -396,8 +410,8 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
     # Breakdown for Document TaxTotal - based on APPLIED categories
     applied_tax_breakdown = {}
 
-    for item in invoice_data['items']: # Assumes items list is valid due to check above
-        qty = Decimal(item.get('quantity', 0))
+    for item in invoice_data['items']: # Assumes items list exists due to check above
+        qty = Decimal(item.get('quantity', 1))
         price = Decimal(item.get('unit_price', 0))
         line_subtotal = qty * price
         line_vat = line_subtotal * (applied_vat_details['rate'] / Decimal(100))
