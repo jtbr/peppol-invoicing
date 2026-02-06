@@ -13,9 +13,9 @@ import sys
 import re
 import base64
 import os
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 
-from .utils import RED, RESET, format_currency, get_decimal_quantizer
+from .utils import RED, RESET, format_currency, get_currency_quantizer
 
 
 class InvoiceValidationError(Exception):
@@ -254,9 +254,8 @@ def create_invoice_line(parent, line_id, item_data, currency, line_vat_details,
     applied_tax_cat_id = line_vat_details['category_code']
     vat_reason = line_vat_details.get('reason')
 
-    quantizer = get_decimal_quantizer(currency)
-    line_subtotal = (qty * price).quantize(quantizer, rounding=ROUND_HALF_UP)
-    line_vat_amount = (line_subtotal * applied_vat_rate / Decimal(100)).quantize(quantizer, rounding=ROUND_HALF_UP)
+    quantize = get_currency_quantizer(currency)
+    line_subtotal = quantize(qty * price)
 
     line = etree.SubElement(parent, E("InvoiceLine", NS_CAC))
     etree.SubElement(line, E("ID", NS_CBC)).text = str(line_id)
@@ -275,28 +274,9 @@ def create_invoice_line(parent, line_id, item_data, currency, line_vat_details,
         if line_period_end:
             etree.SubElement(line_period, E("EndDate", NS_CBC)).text = line_period_end
 
-    # --- Applied VAT on Line (BT-118 / TaxTotal) ---
-    line_tax_total = etree.SubElement(line, E("TaxTotal", NS_CAC)) # Keep this structure, required by EN16931 (ignore UBL-CR-561)
-    line_tax_amt = etree.SubElement(line_tax_total, E("TaxAmount", NS_CBC), currencyID=currency)
-    line_tax_amt.text = format_currency(line_vat_amount, currency_symbol='', currency_code=currency)
-
-    # TaxSubtotal is optional within Line TaxTotal per UBL, but often needed for clarity/validation
-    # If included, it mirrors the line's tax.
-    line_tax_subtotal = etree.SubElement(line_tax_total, E("TaxSubtotal", NS_CAC))
-    line_taxable_amt = etree.SubElement(line_tax_subtotal, E("TaxableAmount", NS_CBC), currencyID=currency)
-    line_taxable_amt.text = format_currency(line_subtotal, currency_symbol='', currency_code=currency)
-    line_tax_sub_amt = etree.SubElement(line_tax_subtotal, E("TaxAmount", NS_CBC), currencyID=currency)
-    line_tax_sub_amt.text = format_currency(line_vat_amount, currency_symbol='', currency_code=currency)
-
-    # The single Tax Category for this line
-    tax_category = etree.SubElement(line_tax_subtotal, E("TaxCategory", NS_CAC))
-    etree.SubElement(tax_category, E("ID", NS_CBC)).text = applied_tax_cat_id # Applied category ('S', 'AE', 'O')
-    etree.SubElement(tax_category, E("Percent", NS_CBC)).text = f"{applied_vat_rate:.2f}" # Applied rate (21% or 0%)
-    # Add Exemption Reason ONLY if code requires it (NOT 'S', NOT 'Z')
-    if applied_tax_cat_id not in ["S", "Z"] and vat_reason:
-        etree.SubElement(tax_category, E("TaxExemptionReason", NS_CBC)).text = vat_reason
-    tax_scheme_cat = etree.SubElement(tax_category, E("TaxScheme", NS_CAC))
-    etree.SubElement(tax_scheme_cat, E("ID", NS_CBC)).text = "VAT"
+    # NOTE: Line-level TaxTotal is omitted per Belgian e-invoicing rules (Jan 2026):
+    # VAT rounding is only permitted on the total per VAT rate, not per line.
+    # Line-level TaxTotal is optional in EN16931/UBL; document-level TaxTotal is authoritative.
 
     # --- Item Details ---
     item = etree.SubElement(line, E("Item", NS_CAC))
@@ -423,6 +403,7 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
             etree.SubElement(contract_ref, E("IssueDate", NS_CBC)).text = invoice_data['contract_issue_date']
 
     # --- PDF Attachment ---
+    # TODO: generalize to allow other types of attachments
     if pdf_filename and os.path.exists(pdf_filename):
         try:
             with open(pdf_filename, "rb") as pdf_file:
@@ -478,32 +459,38 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
         etree.SubElement(payment_terms, E("Note", NS_CBC)).text = payment_terms_note
 
     # --- PRE-CALCULATE TOTALS ---
+    # Belgian e-invoicing rule (Jan 2026): VAT rounding only allowed on total per VAT rate,
+    # not per line. We accumulate unrounded taxable amounts, then calculate and round VAT once per rate.
     total_line_extension_amount = Decimal(0)
-    total_tax_amount = Decimal(0)
-    # Breakdown for Document TaxTotal - based on APPLIED categories
     applied_tax_breakdown = {}
-    quantizer = get_decimal_quantizer(currency)
+    quantize = get_currency_quantizer(currency)
 
-    for item in invoice_data['items']: # Assumes items list exists due to check above
+    for item in invoice_data['items']:
         qty = Decimal(str(item.get('quantity', 1)))
         price = Decimal(str(item.get('unit_price', 0)))
-        line_subtotal = (qty * price).quantize(quantizer, rounding=ROUND_HALF_UP)
-        line_vat = (line_subtotal * applied_vat_details['rate'] / Decimal(100)).quantize(quantizer, rounding=ROUND_HALF_UP)
+        line_subtotal = quantize(qty * price)
 
         total_line_extension_amount += line_subtotal
-        total_tax_amount += line_vat
 
-        # Accumulate into APPLIED tax breakdown
+        # Accumulate taxable amount per (category, rate) pair (no VAT rounding yet)
+        # Keyed on both category and rate so that e.g. S/6% and S/21% get separate buckets
         applied_cat_code = applied_vat_details['category_code']
-        if applied_cat_code not in applied_tax_breakdown:
-            applied_tax_breakdown[applied_cat_code] = {
-                'rate': applied_vat_details['rate'],
+        applied_rate = applied_vat_details['rate']
+        breakdown_key = (applied_cat_code, applied_rate)
+        if breakdown_key not in applied_tax_breakdown:
+            applied_tax_breakdown[breakdown_key] = {
+                'rate': applied_rate,
                 'taxable': Decimal(0),
-                'tax': Decimal(0),
                 'reason': applied_vat_details.get('reason')
             }
-        applied_tax_breakdown[applied_cat_code]['taxable'] += line_subtotal
-        applied_tax_breakdown[applied_cat_code]['tax'] += line_vat
+        applied_tax_breakdown[breakdown_key]['taxable'] += line_subtotal
+
+    # Now calculate and round VAT once per (category, rate) bucket (compliant with Belgian 2026 rules)
+    total_tax_amount = Decimal(0)
+    for (cat_code, rate), breakdown in applied_tax_breakdown.items():
+        vat_for_category = quantize(breakdown['taxable'] * breakdown['rate'] / Decimal(100))
+        breakdown['tax'] = vat_for_category
+        total_tax_amount += vat_for_category
 
     total_tax_exclusive = total_line_extension_amount
     total_tax_inclusive = total_tax_exclusive + total_tax_amount
@@ -575,8 +562,8 @@ if __name__ == "__main__":
     # TEST DATA
 
     # --- Seller Data (Valid BE number, Legal Reg ID) ---
-    # KBO/BCE 0123456746 -> VAT BE0123456746 (Checksum = 46)
-    seller_company_no = '0123456746' # VALID BE company number
+    # KBO/BCE 0123456749 -> VAT BE0123456749 (Checksum: 97 - (1234567 % 97) = 49)
+    seller_company_no = '0123456749'  # Valid mod97 checksum
     seller_vat = f"BE{seller_company_no}"
     seller_data = {
         'name': 'John Dev Services SPRL', 'street': '1 Rue de la Loi',
@@ -596,8 +583,8 @@ if __name__ == "__main__":
     buyer_data_de = { 'name': buyer_name_de, 'building_name': None, 'floor': '12', 'suite': None, 'street': 'Musterstraße 1', 'city': 'Berlin', 'postal_code': '10117', 'state': None, 'country_code': 'DE',
                      'vat': buyer_vat_de, 'endpoint': f"0204:{buyer_vat_de}", 'legal_registration_id': 'HRB 12345 B' }
 
-    # KBO/BCE 0987654321 -> VAT BE0987654321 (Valid checksum = 21)
-    buyer_company_no_be = '0987654321'; buyer_name_be = 'Client Belge SA'
+    # KBO/BCE 0987654394 -> VAT BE0987654394 (Checksum: 97 - (9876543 % 97) = 94)
+    buyer_company_no_be = '0987654394'; buyer_name_be = 'Client Belge SA'
     buyer_data_be = { 'name': buyer_name_be, 'street': 'Avenue Louise 100', 'city': 'Brussels', 'postal_code': '1050', 'state': None, 'country_code': 'BE',
                      'vat': f"BE{buyer_company_no_be}", 'endpoint': f"0208:{buyer_company_no_be}", 'legal_registration_id': buyer_company_no_be }
 

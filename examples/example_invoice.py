@@ -12,7 +12,7 @@ from peppol_invoicing import CYAN, RESET
 INVOICE_PATH = "invoices"
 
 ## Seller data (invoice issuer)
-seller_company_no = '123456789' # Must be valid BE company number
+seller_company_no = '0123456749' # VALID BE company number (checksum == 46)
 seller_vat = f"BE{seller_company_no}"
 seller_data = {
     'name': 'My Company',
@@ -30,7 +30,7 @@ seller_data = {
 }
 
 ## Buyer Data (invoice recipient)
-buyer_company_no = '987654321' # Must be valid BE company number
+buyer_company_no = '0987654394' # Valid BE company number (checksum == 21)
 buyer_country_code = 'BE'
 buyer_vat = f"{buyer_country_code}{buyer_company_no}"  # ASSUMES the relevant country uses the same company and VAT numbers (for BE, it's true)
 buyer_endpoint = f"0208:{buyer_company_no}"

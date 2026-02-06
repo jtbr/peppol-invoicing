@@ -27,9 +27,9 @@ from docx.oxml import OxmlElement
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
-from .utils import (RED, RESET, format_currency, get_decimal_quantizer, get_currency_symbol,
+from .utils import (RED, RESET, format_currency, get_currency_quantizer, get_currency_symbol,
                     get_relevant_month)
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 
 def fill_word_invoice(template_path, output_path, data, params = None):
     doc = Document(template_path)
@@ -67,7 +67,7 @@ def fill_word_invoice(template_path, output_path, data, params = None):
     # Optional data['currency_symbol'] overrides the auto-looked-up symbol
     currency_code = data.get('currency', 'EUR')
     currency_symbol = data['currency_symbol'] if 'currency_symbol' in data else get_currency_symbol(currency_code)
-    quantizer = get_decimal_quantizer(currency_code)
+    quantize = get_currency_quantizer(currency_code)
 
     # Replace table placeholder with real items table
     pretax_total = Decimal(0)
@@ -140,7 +140,7 @@ def fill_word_invoice(template_path, output_path, data, params = None):
                 cell._tc.get_or_add_tcPr().append(OxmlElement('w:shd', {'{http://schemas.openxmlformats.org/wordprocessingml/2006/main}w': "clear", '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}color': "auto", '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}fill': params['table_header_fillcolor']}))
 
             pretax_total = Decimal(0)
-            total = Decimal(0)
+            vat_breakdown = {}  # {rate: taxable_amount} for per-rate VAT rounding
 
             for item in data['items']:
                 row_cells = table.add_row().cells
@@ -152,11 +152,14 @@ def fill_word_invoice(template_path, output_path, data, params = None):
                 qty = Decimal(str(item.get('quantity', 1)))
                 price = Decimal(str(item['unit_price']))
                 vat_pct = Decimal(str(item['vat_pct']))
-                item_subtotal = (qty * price).quantize(quantizer, rounding=ROUND_HALF_UP)
-                item_total = (item_subtotal * (Decimal(100) + vat_pct) / Decimal(100)).quantize(quantizer, rounding=ROUND_HALF_UP)
-                row_cells[4].text = format_currency(item_total, currency_symbol='', currency_code=currency_code)
+                item_subtotal = quantize(qty * price)
+                # Line total shown in table is informational (for human readability)
+                item_total_display = quantize(item_subtotal * (Decimal(100) + vat_pct) / Decimal(100))
+                row_cells[4].text = format_currency(item_total_display, currency_symbol='', currency_code=currency_code)
+
                 pretax_total += item_subtotal
-                total += item_total
+                # Accumulate taxable amounts per VAT rate for proper rounding
+                vat_breakdown[vat_pct] = vat_breakdown.get(vat_pct, Decimal(0)) + item_subtotal
 
                 row_cells[0].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
                 for j, cell in enumerate(row_cells):
@@ -170,6 +173,13 @@ def fill_word_invoice(template_path, output_path, data, params = None):
                             run.font.size = Pt(params['table_item_fontsize'])
                             run.font.color.rgb = RGBColor(0, 0, 0)
                             run.font.bold = False
+
+            # Calculate VAT per rate (Belgian 2026 rule: round only on total per rate, not per line)
+            vat_total = Decimal(0)
+            for rate, taxable in vat_breakdown.items():
+                vat_for_rate = quantize(taxable * rate / Decimal(100))
+                vat_total += vat_for_rate
+            total = pretax_total + vat_total
 
             # Add bottom border to the last row
             last_row = table.rows[-1]
@@ -186,7 +196,7 @@ def fill_word_invoice(template_path, output_path, data, params = None):
             p.getparent().remove(p)
             break
 
-    vat_total = total - pretax_total
+    # Note: vat_total and total already calculated above using per-rate rounding
 
     # Replace simple placeholders
     notes = data.get('notes', '')

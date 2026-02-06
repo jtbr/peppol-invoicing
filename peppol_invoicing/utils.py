@@ -80,7 +80,10 @@ def get_currency_symbol(currency_code: str) -> str:
 
 
 def get_decimal_quantizer(currency_code: str) -> Decimal:
-    """Returns a Decimal quantizer string for the given currency (e.g., '0.01' for 2 decimals)."""
+    """Returns a Decimal quantizer value for the given currency (e.g., Decimal('0.01') for 2 decimals).
+
+    Note: Prefer get_currency_quantizer() which returns a ready-to-use function with ROUND_HALF_UP.
+    """
     decimals = get_currency_decimals(currency_code)
     if decimals == 0:
         return Decimal('1')
@@ -88,9 +91,30 @@ def get_decimal_quantizer(currency_code: str) -> Decimal:
         return Decimal('0.' + '0' * decimals)
 
 
+def get_currency_quantizer(currency_code: str):
+    """Returns a function that quantizes a Decimal to the currency's decimal places using ROUND_HALF_UP.
+
+    Args:
+        currency_code: ISO 4217 currency code (e.g., 'EUR', 'USD', 'JPY')
+
+    Returns:
+        A function that takes a Decimal and returns it quantized to the correct decimal places.
+
+    Example:
+        quantize = get_currency_quantizer('EUR')
+        result = quantize(Decimal('1234.567'))  # Returns Decimal('1234.57')
+    """
+    quantizer = get_decimal_quantizer(currency_code)
+
+    def quantize(amount: Decimal) -> Decimal:
+        return amount.quantize(quantizer, rounding=ROUND_HALF_UP)
+
+    return quantize
+
+
 # --- Helper function to format currency ---
 def format_currency(amount: int|float|Decimal, currency_symbol: str | None = None, currency_first: bool = True,
-                    currency_code: str = None) -> str:
+                    currency_code: str = '') -> str:
     """
     Formats a Decimal or number to a string with the appropriate decimal places.
 
@@ -108,15 +132,10 @@ def format_currency(amount: int|float|Decimal, currency_symbol: str | None = Non
     # Convert via str() to avoid float precision issues (e.g., Decimal(0.1) != Decimal('0.1'))
     amount_dec = Decimal(str(amount)) if not isinstance(amount, Decimal) else amount
 
-    # Determine decimal places
-    if currency_code:
-        quantizer = get_decimal_quantizer(currency_code)
-        decimals = get_currency_decimals(currency_code)
-    else:
-        quantizer = Decimal('0.01')
-        decimals = 2
-
-    rounded = amount_dec.quantize(quantizer, rounding=ROUND_HALF_UP)
+    # Quantize to currency's decimal places (defaults to 2 for unknown currencies)
+    quantize = get_currency_quantizer(currency_code)
+    decimals = get_currency_decimals(currency_code)
+    rounded = quantize(amount_dec)
     currency_text = f"{rounded:.{decimals}f}"
 
     # Determine symbol: None means auto-lookup, '' means no symbol
@@ -238,17 +257,50 @@ def get_relevant_month(a_date:str=""):
         return previous_month.replace(day=1)
 
 
-def format_belgian_company_number(company_number:int|str) -> str|None:
+def validate_belgian_company_number(company_number: int|str) -> bool:
+    """
+    Validates a Belgian company number (KBO/BCE) using the mod97 checksum.
+
+    Belgian enterprise numbers are 10 digits where:
+    - First 8 digits are the base number
+    - Last 2 digits are check digits: 97 - (first_8 mod 97)
+
+    Required by PEPPOL-COMMON-R043 for scheme 0208 endpoints.
+
+    Args:
+        company_number: The 10-digit company number (int or str)
+
+    Returns:
+        bool: True if valid, False otherwise
+    """
+    # Normalize to 10-digit string
+    try:
+        num_str = f"{int(company_number):010}"
+    except (ValueError, TypeError):
+        return False
+
+    if len(num_str) != 10 or not num_str.isdigit():
+        return False
+
+    base = int(num_str[:8])
+    check_digits = int(num_str[8:])
+    expected_check = 97 - (base % 97)
+
+    return check_digits == expected_check
+
+
+def format_belgian_company_number(company_number: int|str, validate: bool = True) -> str|None:
     """
     Formats a 10-digit Belgian company number (KBO/BCE number) into a string
     with the format "####.###.###", *preserving leading zeros*.
 
     Args:
         company_number (int or str): The 10-digit company number
+        validate (bool): If True, validates the mod97 checksum (default: True)
 
     Returns:
         str: The formatted company number string (e.g., "0001.234.567") or None
-             if the input is invalid (not 10 digits).
+             if the input is invalid (not 10 digits or fails checksum).
     """
 
     try:
@@ -259,10 +311,15 @@ def format_belgian_company_number(company_number:int|str) -> str|None:
         return None
 
     # Check if the number is exactly 10 digits long when treated as a string
-    company_number_str = f"{company_number:010}" # Format to 10 digits with leading zeros
+    company_number_str = f"{company_number:010}"  # Format to 10 digits with leading zeros
 
     if len(company_number_str) != 10:
         print("Error: Company number must be exactly 10 digits.")
+        return None
+
+    # Validate mod97 checksum if requested
+    if validate and not validate_belgian_company_number(company_number_str):
+        print(f"Error: Company number {company_number_str} fails mod97 checksum validation.")
         return None
 
     # Format the number string

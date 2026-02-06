@@ -1,5 +1,6 @@
 from .utils import (format_currency, validate_invoice, get_next_invoice_id,
                     get_relevant_month, format_belgian_company_number,
+                    validate_belgian_company_number,
                     format_ein, format_street_address,
                     get_currency_decimals, get_currency_symbol, get_decimal_quantizer,
                     CURRENCY_DECIMALS, CURRENCY_SYMBOLS,
@@ -12,6 +13,7 @@ from .docx_invoice import fill_word_invoice
 __all__ = [
     'format_currency', 'validate_invoice', 'get_next_invoice_id',
     'get_relevant_month', 'format_belgian_company_number',
+    'validate_belgian_company_number',
     'format_ein', 'format_street_address',
     'get_currency_decimals', 'get_currency_symbol', 'get_decimal_quantizer',
     'CURRENCY_DECIMALS', 'CURRENCY_SYMBOLS',

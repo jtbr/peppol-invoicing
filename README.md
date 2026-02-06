@@ -41,11 +41,11 @@ Typically a script should be created for each customer, which generates the invo
   ```
 
 All invoices are placed in the `invoices/` subdirectory.
+
 Final PEPPOL/UBL/EN16931 validation (including against business rules) can be done online:
 
-- <https://ecosio.com/en/peppol-and-xml-document-validator/>
 - <https://app.b2brouter.net/en/validation>
-- <https://www.ubl.be/validator/>
+- <https://ecosio.com/en/peppol-and-xml-document-validator/> with "OpenPeppol UBL Invoice (2025.5) (aka BIS Billing 3.0.19)" (or more recent) rule set
 
 `peppol_invoice_sending.py` contains experimental code for sending XML invoices via a PEPPOL Access Point. This is untested and serves as a starting point. For production PEPPOL sending, consider [peppol-py](https://github.com/iterasdev/peppol-py) or a commercial Access Point provider.
 
@@ -89,6 +89,10 @@ XML e-Invoices like:
 Human-friendly invoices based on fully-customizable templates, like:
 ![Human readable invoices](examples/sample_invoice.png)
 
+
+## VAT Rounding
+
+Starting January 2026, Belgian e-invoicing rules require that VAT rounding only be applied to the total amount per VAT rate, not per line. This library follows this rule: line extension amounts (subtotals) are rounded per line, but VAT is calculated and rounded once per VAT rate at the document level. Line-level TaxTotal elements are omitted from the XML as they are optional in EN16931/UBL and could create rounding discrepancies.
 
 ## Limitations
 
