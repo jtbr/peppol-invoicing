@@ -2,6 +2,9 @@
 invoices/
 invoice-samples/
 
+# Poetry lock file (not committed for libraries — version ranges in pyproject.toml are sufficient)
+poetry.lock
+
 # Python
 __pycache__/
 *.py[cod]

@@ -1,8 +1,8 @@
 # simple script for creating an invoice for a single customer
 # This should be duplicated and modified for any other clients.
+import argparse
 import copy
 import os
-import sys
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
@@ -10,6 +10,8 @@ import peppol_invoicing as invoicing
 from peppol_invoicing import CYAN, RESET
 
 INVOICE_PATH = "invoices"
+_EXAMPLES_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_TEMPLATE = os.path.join(_EXAMPLES_DIR, '..', 'templates', 'human_invoice_template.docx')
 
 ## Seller data (invoice issuer)
 seller_company_no = '0123456749' # VALID BE company number (checksum == 46)
@@ -57,13 +59,16 @@ contract_data = {
     'monthly_retainer': 200
 }
 
-def generate_complete_invoice(hours_worked, delivery_royalties, template_path='templates/human_invoice_template.docx', term_days=30):
+def generate_complete_invoice(hours_worked, delivery_royalties, retainer=None, widgets=0,
+                              template_path=DEFAULT_TEMPLATE, term_days=30):
     """
     Generates Human-readable .docx invoice, converts it to PDF
     Then generates EN16931-compliant e-Invoice (in two copies, with and without the PDF embedded)
 
     Billing is based upon hours worked at the contract rate, plus any copyright royalties (in currency units)
-    term_days is the number of days until the invoice is due for payment
+    retainer: amount to bill as a monthly retainer (default: contract value; 0 to omit)
+    widgets: number of widgets to include (default: 0, omit)
+    term_days: number of days until the invoice is due for payment
     """
 
     if not os.path.exists(INVOICE_PATH):
@@ -82,6 +87,16 @@ def generate_complete_invoice(hours_worked, delivery_royalties, template_path='t
     billable_month_text = billable_month_start.strftime('%B')  # %Y for year
     invoice_start_date = billable_month_start.isoformat(); invoice_end_date = (billable_month_start + relativedelta(months=1, days=-1)).isoformat()
 
+    items = [
+        {'description': f"{contract_data['work_description']} thru {billable_month_text}",
+         'quantity': hours_worked, 'unit_price': contract_data['hourly_rate'], 'unit_code': 'HUR'},
+    ]
+    retainer_amount = retainer if retainer is not None else contract_data['monthly_retainer']
+    if retainer_amount > 0:
+        items.append({'description': f"Retainer for {billable_month_text}", 'unit_price': retainer_amount})
+    if widgets > 0:
+        items.append({'description': "Widgets", 'quantity': widgets, 'unit_price': 35.50})
+
     # coded for the XML machine-readable invoice
     invoice_data = {
         'invoice_number': invoice_id,
@@ -90,12 +105,7 @@ def generate_complete_invoice(hours_worked, delivery_royalties, template_path='t
         'payment_terms_note': f"Payment due within {term_days} days.",
         'invoice_period_start_date': invoice_start_date, 'invoice_period_end_date': invoice_end_date,
         'invoice_period_description': f"Services thru {billable_month_text}",
-        'items': [
-            {'description': f"{contract_data['work_description']} thru {billable_month_text}", 'quantity': hours_worked,
-             'unit_price': contract_data['hourly_rate'], 'unit_code': 'HUR'},
-            {'description': f"Retainer for {billable_month_text}", 'unit_price': contract_data['monthly_retainer']}, # no quantity => lump sum
-            {'description': f"Widgets", 'quantity': 12, 'unit_price': 35.50},
-        ],
+        'items': items,
         'accent_fill_color': '#46a6af'
     }
     # include contract data like currency and contract ID for reference (not all fields are used)
@@ -167,8 +177,7 @@ def generate_complete_invoice(hours_worked, delivery_royalties, template_path='t
 
     # validate against UBL-2.1 schema. This enforces basic elements, but EN 16931 is stricter and PEPPOL has additional requirements.
     # (You need to use an online (or Java-based) check for those. See validate_invoice.py)
-    schema_path = "UBL-2.1/schemas/UBL-Invoice-2.1.xsd"
-    succeeded, errors = invoicing.validate_invoice(xml_path, schema_path)
+    succeeded, errors = invoicing.validate_invoice(xml_path)
     if succeeded:
         print(f"✅ {xml_path} is valid against UBL-2.1 standard. EN16931 and PEPPOL are unconfirmed.")
     else:
@@ -180,13 +189,14 @@ def generate_complete_invoice(hours_worked, delivery_royalties, template_path='t
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help'):
-        print("Usage: python examples/example_invoice.py <hours_worked> [delivery_royalties (0)]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Generate an invoice for a customer.")
+    parser.add_argument('hours', type=float, help='Hours worked')
+    parser.add_argument('--royalties', type=float, default=0.0,
+                        help='Copyright royalties in currency units (default: 0)')
+    parser.add_argument('--retainer', type=float, default=None,
+                        help=f"Monthly retainer amount (default: contract value {contract_data['monthly_retainer']}); pass 0 to omit")
+    parser.add_argument('--widgets', type=int, default=0,
+                        help='Number of widgets to include (default: 0, omitted)')
+    args = parser.parse_args()
 
-    args = sys.argv[1:]
-    royalties = 0.0
-    if len(args) >= 2:
-        royalties = float(args[1])
-
-    generate_complete_invoice(float(args[0]), royalties)
+    generate_complete_invoice(args.hours, args.royalties, retainer=args.retainer, widgets=args.widgets)

@@ -246,6 +246,24 @@ class TestGenerateInvoice(unittest.TestCase):
             if os.path.exists(filepath):
                 os.unlink(filepath)
 
+    def test_generate_invoice_intra_eu_missing_vat_raises(self):
+        """Intra-EU reverse charge without buyer VAT number should raise error."""
+        self.buyer_data['country_code'] = 'DE'
+        self.buyer_data['vat'] = None
+        self.buyer_data['endpoint'] = None
+
+        with tempfile.NamedTemporaryFile(suffix='.xml', delete=False) as f:
+            filepath = f.name
+
+        try:
+            with self.assertRaises(InvoiceValidationError):
+                generate_en16931_invoice(
+                    filepath, self.invoice_data, self.seller_data, self.buyer_data
+                )
+        finally:
+            if os.path.exists(filepath):
+                os.unlink(filepath)
+
     def test_generate_invoice_missing_items(self):
         """Invoice without items should raise error."""
         self.invoice_data['items'] = []

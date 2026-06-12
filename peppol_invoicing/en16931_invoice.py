@@ -15,7 +15,7 @@ import base64
 import os
 from decimal import Decimal
 
-from .utils import RED, RESET, format_currency, get_currency_quantizer
+from .utils import RED, YELLOW, RESET, format_currency, get_currency_quantizer
 
 
 class InvoiceValidationError(Exception):
@@ -101,8 +101,12 @@ def determine_vat_details(buyer_country, seller_country="BE", domestic_vat_rate=
         dict: {'rate': Decimal, 'category_code': str, 'reason': str | None}
 
     Note:
-        BELGIAN-SPECIFIC: The exemption reason texts reference Belgian/EU VAT articles.
-        Sellers in other jurisdictions may need to override the 'reason' field.
+        This infers VAT treatment solely from country codes. It is the caller's
+        responsibility to verify the result is correct for their specific situation.
+        When in doubt, consult a tax advisor.
+
+        Exemption reason texts reference EU VAT Directive articles and apply to any EU seller.
+        Override the 'reason' field if your specific situation requires different wording.
     """
     _validate_country_code(buyer_country, "buyer_country")
     _validate_country_code(seller_country, "seller_country")
@@ -126,13 +130,11 @@ def determine_vat_details(buyer_country, seller_country="BE", domestic_vat_rate=
             # Optional: Reason Code (e.g., "VATEX-EU-AE") - BT-121
         }
     else:
-        # Export outside EU -> Out of scope
-        # BELGIAN-SPECIFIC: "Article 39 of the VAT Code" refers to Belgian VAT Code.
-        # Other EU countries have equivalent articles in their national VAT legislation.
+        # Export outside EU -> Out of scope (Art. 44 VAT Directive for services)
         return {
             'rate': Decimal("0.00"),
             'category_code': "O", # Service outside scope of tax
-            'reason': "Export outside the EU - Out of scope (Exempt under Article 39 of the VAT Code)"
+            'reason': "Out of scope of VAT — place of supply outside the EU (Art. 44 / 146 VAT Directive)"
             # Optional: Reason Code (e.g., "VATEX-EU-O") - BT-121
         }
 
@@ -359,7 +361,15 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
     applied_vat_details = determine_vat_details(buyer_data['country_code'], seller_data['country_code'],
                                                 seller_vat_rate, seller_vat_category)
     invoice_vat_context = applied_vat_details['category_code']
-    print(f"Determined APPLIED VAT Details:\n  {applied_vat_details}")
+    print(f"Inferred VAT treatment (to verify):\n  {applied_vat_details}")
+
+    if invoice_vat_context == 'AE':
+        print(f"{YELLOW}Note: Intra-EU reverse charge applied — assuming B2B transaction.{RESET}")
+        if not buyer_data.get('vat'):
+            raise InvoiceValidationError(
+                "Buyer VAT number is required for intra-EU reverse charge. "
+                "This library only supports B2B invoicing; B2C intra-EU sales are not implemented."
+            )
 
     nsmap = { None: NS_INVOICE, "cac": NS_CAC, "cbc": NS_CBC }
     Invoice = etree.Element(E("Invoice", NS_INVOICE), nsmap=nsmap)
@@ -502,7 +512,7 @@ def generate_en16931_invoice(xml_filepath, invoice_data, seller_data, buyer_data
     etree.SubElement(tax_total, E("TaxAmount", NS_CBC), currencyID=currency).text = format_currency(total_tax_amount, currency_symbol='', currency_code=currency)
 
     # Generate breakdown ONLY for the APPLIED VAT categories found
-    for cat_code, totals in sorted(applied_tax_breakdown.items()):
+    for (cat_code, _rate), totals in sorted(applied_tax_breakdown.items()):
         tax_subtotal = etree.SubElement(tax_total, E("TaxSubtotal", NS_CAC))
         # Taxable amount MUST match sum of lines where this category was APPLIED
         etree.SubElement(tax_subtotal, E("TaxableAmount", NS_CBC), currencyID=currency).text = format_currency(totals['taxable'], currency_symbol='', currency_code=currency)

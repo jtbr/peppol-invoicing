@@ -213,12 +213,13 @@ def fill_word_invoice(template_path, output_path, data, params = None):
         '[TOTAL]': format_currency(total, currency_symbol=currency_symbol, currency_first=cur1st, currency_code=currency_code),
     }
 
-    # TODO: Prepayments/credits/allowances are not yet supported in either DOCX or XML generation.
+    # TODO: Prepayments/credits/allowances are not yet supported in XML generation. Until then, keep this disabled for parity.
     # Supporting this would require: PrepaidAmount in XML LegalMonetaryTotal, template placeholders
     # that can be cleanly removed when not used, and matching logic in both generators.
     # # handle credits, if any
     # amount_due_total = total
-    # if data.get('credit'):
+    if data.get('credit'):
+        raise NotImplementedError("Credits are NOT CURRENTLY SUPPORTED!")
     #     amount_due_total -= Decimal(str(data['credit']))
     #     credit_fields = {
     #       '[CREDIT_TXT]': data['credit_text'],
@@ -228,14 +229,15 @@ def fill_word_invoice(template_path, output_path, data, params = None):
     #     }
     #     if amount_due_total <= 0:
     #         notes = data.get('no_payment_text', '') + notes
-    # else:
-    #     credit_fields = {
-    #       '[CREDIT_TXT]': '',
-    #       '[CREDIT]': '',
-    #       '[AMOUNT_DUE_TXT]': '',
-    #       '[FINAL_TOTAL]': ''
-    #     }
-    # replacements |= credit_fields
+    else:
+        # remove any placeholders from template
+        credit_fields = {
+          '[CREDIT_TXT]': '',
+          '[CREDIT]': '',
+          '[AMOUNT_DUE_TXT]': '',
+          '[FINAL_TOTAL]': ''
+        }
+    replacements |= credit_fields
     replacements['[NOTES]'] = notes
 
     replace_placeholder(doc.paragraphs, replacements)
@@ -273,6 +275,6 @@ if __name__ == "__main__":
 
     # Use US or EU template as applicable
     doc_params = {'table_header_fillcolor': '#FF00FF', 'currency_as_prefix': True}
-    fill_word_invoice('templates/human_invoice_template.docx', output_docx, invoice_data, doc_params)
+    fill_word_invoice('../templates/human_invoice_template.docx', output_docx, invoice_data, doc_params)
 
     print("Generated bill for", billable_month)

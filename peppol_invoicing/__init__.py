@@ -3,6 +3,7 @@ from .utils import (format_currency, validate_invoice, get_next_invoice_id,
                     validate_belgian_company_number,
                     format_ein, format_street_address,
                     get_currency_decimals, get_currency_symbol, get_decimal_quantizer,
+                    get_data_path,
                     CURRENCY_DECIMALS, CURRENCY_SYMBOLS,
                     RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, RESET)
 from .docx2pdf import convert_docx_to_pdf
@@ -16,6 +17,7 @@ __all__ = [
     'validate_belgian_company_number',
     'format_ein', 'format_street_address',
     'get_currency_decimals', 'get_currency_symbol', 'get_decimal_quantizer',
+    'get_data_path',
     'CURRENCY_DECIMALS', 'CURRENCY_SYMBOLS',
     'convert_docx_to_pdf',
     'generate_en16931_invoice', 'determine_vat_details', 'InvoiceValidationError',

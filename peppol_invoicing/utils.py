@@ -3,6 +3,13 @@
 import os
 import re
 import sys
+
+_PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def get_data_path(relative_path: str) -> str:
+    """Return the absolute path to a file bundled with the peppol_invoicing package."""
+    return os.path.join(_PACKAGE_DIR, relative_path)
 from datetime import date, datetime
 from dateutil.relativedelta import relativedelta
 import lxml.etree as ET
@@ -148,7 +155,9 @@ def format_currency(amount: int|float|Decimal, currency_symbol: str | None = Non
         return currency_text
 
 
-def validate_invoice(xml_path, xsd_path):
+def validate_invoice(xml_path, xsd_path=None):
+    if xsd_path is None:
+        xsd_path = get_data_path('UBL-2.1/schemas/UBL-Invoice-2.1.xsd')
     xml_doc = ET.parse(xml_path)
     xsd_doc = ET.parse(xsd_path)
     xmlschema = ET.XMLSchema(xsd_doc)
@@ -372,23 +381,21 @@ def format_street_address(address_data, use_linefeeds=False, country_alone=False
 
     address_lines = []
 
-    # Add building name if present
+    # Combine building name, floor and suite info into a first address line, if applicable
+    building_line = []
     if building_name:
-        address_lines.append(building_name)
+        building_line.append(building_name)
+    if floor:
+        building_line.append(f"Floor {floor}")
+    if suite:
+        building_line.append(suite) # Might include "Suite" "Apt" or similar
+    building_line = ", ".join(building_line)
+
+    if building_line: # Only add building_line if present
+        address_lines.append(building_line)
 
     # Add street address (always present due to initial check)
     address_lines.append(street)
-
-    # Add floor and suite info to street if available
-    floor_suite = []
-    if floor:
-        floor_suite.append(f"Floor {floor}")
-    if suite:
-        floor_suite.append(suite) # Might include "Suite" "Apt" or similar
-
-    if floor_suite: # Only add floor_suite to street line if present
-        # Need to replace existing street before adding floor_suite to avoid double adding it
-        address_lines[-1] += " " + ", ".join(floor_suite)
 
     # Postal code, city and country code
     if country_code == 'US':
