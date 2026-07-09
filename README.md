@@ -17,6 +17,8 @@ Since January 2026, Belgian B2B invoices must be issued as structured e-invoices
 - **Payment means support**: SEPA credit transfer, ACH/wire
 - **Configurable** seller VAT rate for non-Belgian EU sellers
 
+If this saved you time, money, or effort, help [![Fuel the code](https://justinbriggs.net/tips-badge.svg)](https://justinbriggs.net/tips?ref=peppol)
+
 ## How it works
 
 Invoices are created in two forms: DOCX/PDF for humans and XML for machine-processing (and potential submission via PEPPOL).
